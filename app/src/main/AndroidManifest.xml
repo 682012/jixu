@@ -133,6 +133,10 @@
         android:value="long_running_workspace_task" />
     </service>
     <service
+      android:name=".service.BackgroundShellForegroundService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync" />
+    <service
       android:name=".service.MediaCreationForegroundService"
       android:exported="false"
       android:foregroundServiceType="dataSync" />

@@ -20,6 +20,7 @@ import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.buildMemoryPrompt
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
+import me.rerere.rikkahub.data.ai.transformers.BackgroundShellReminderTransformer
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -48,6 +49,7 @@ import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.repository.memoryId
+import me.rerere.rikkahub.service.BackgroundShellManager
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
@@ -81,6 +83,7 @@ class ChatRequestFactory(
     private val memoryRepository: MemoryRepository,
     templateTransformer: TemplateTransformer,
     workspaceRepository: WorkspaceRepository,
+    backgroundShellManager: BackgroundShellManager,
 ) {
     private val inputTransformers: List<InputMessageTransformer> = listOf(
         TimeReminderTransformer,
@@ -90,6 +93,7 @@ class ChatRequestFactory(
         OcrTransformer,
         templateTransformer,
         WorkspaceReminderTransformer(workspaceRepository),
+        BackgroundShellReminderTransformer(backgroundShellManager),
     )
 
     private val outputTransformers: List<OutputMessageTransformer> = listOf(
@@ -256,6 +260,7 @@ class ChatRequestFactory(
             settings = turn.settings,
             processingStatus = processingStatus,
             workspaceCwd = turn.workspaceCwd,
+            conversationId = turn.conversationId,
         )
         val params = TextGenerationParams(
             model = turn.model,
