@@ -9,3 +9,6 @@ local.properties
 msg_cache/
 *.apk
 *.aab
+.cxx/
+__pycache__/
+*.pyc
