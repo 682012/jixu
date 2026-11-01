@@ -1,0 +1,167 @@
+name: Fork Verify
+
+# 维护分支验证：只在推送 ci/** 分支或手动触发时运行；只构建与测试，不发布 Release。
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+
+concurrency:
+  group: fork-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CERT_SHA256: cb897a361d49933cc7d033b7ff05b95fad6483c18bb4134b10119b0f2715bf89
+
+jobs:
+  release:
+    name: Signed release (R8 + lintVital)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: jetbrains
+          java-version: '21'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Signing and placeholder config
+        run: |
+          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > app/app.key
+          echo "${{ secrets.SIGNING_CONFIG }}" > local.properties
+          bash .github/scripts/placeholder-google-services.sh
+      - name: Build
+        run: ./gradlew :app:assembleGithubRelease --stacktrace
+      - name: Verify APK
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          cd app/build/outputs/apk/github/release
+          ls -la
+          for f in *.apk; do
+            echo "== $f"
+            stat -c '%s bytes' "$f"
+            sha256sum "$f" | tee -a SHA256SUMS
+            "$BT/aapt2" dump badging "$f" | head -1
+            "$BT/apksigner" verify --print-certs -v "$f" | grep -E 'Verified using|certificate SHA-256' | tee "$f.cert.txt"
+            grep -qi "certificate SHA-256 digest: $CERT_SHA256" "$f.cert.txt" || { echo "::error::signing certificate mismatch for $f"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          retention-days: 7
+          path: |
+            app/build/outputs/apk/github/release/*.apk
+            app/build/outputs/apk/github/release/SHA256SUMS
+            app/build/outputs/apk/github/release/output-metadata.json
+
+  unit:
+    name: JVM unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: jetbrains
+          java-version: '21'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Placeholder config
+        run: bash .github/scripts/placeholder-google-services.sh
+      - name: Test
+        run: ./gradlew testDebugUnitTest :app:testGithubDebugUnitTest --continue --stacktrace
+      - name: Summary
+        if: always()
+        run: python3 .github/scripts/junit-summary.py | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          retention-days: 7
+          path: '**/build/test-results/**/*.xml'
+
+  instrumented:
+    name: Android instrumented tests (API 34)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: jetbrains
+          java-version: '21'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Placeholder config
+        run: bash .github/scripts/placeholder-google-services.sh
+      - name: Build test APKs
+        run: ./gradlew :app:assembleGithubDebug :app:assembleGithubDebugAndroidTest --stacktrace
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: ./gradlew :app:connectedGithubDebugAndroidTest --continue
+      - name: Summary
+        if: always()
+        run: python3 .github/scripts/junit-summary.py app/build/outputs/androidTest-results | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: instrumented-test-results
+          retention-days: 7
+          path: app/build/outputs/androidTest-results/**

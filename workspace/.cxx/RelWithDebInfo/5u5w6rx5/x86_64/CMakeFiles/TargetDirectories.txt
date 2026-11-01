@@ -1,4 +1,0 @@
-/data/data1/rk3mod/src31/workspace/.cxx/RelWithDebInfo/5u5w6rx5/x86_64/CMakeFiles/workspace.dir
-/data/data1/rk3mod/src31/workspace/.cxx/RelWithDebInfo/5u5w6rx5/x86_64/CMakeFiles/termux.dir
-/data/data1/rk3mod/src31/workspace/.cxx/RelWithDebInfo/5u5w6rx5/x86_64/CMakeFiles/edit_cache.dir
-/data/data1/rk3mod/src31/workspace/.cxx/RelWithDebInfo/5u5w6rx5/x86_64/CMakeFiles/rebuild_cache.dir

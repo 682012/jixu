@@ -22,6 +22,7 @@ import me.rerere.rikkahub.data.repository.isToolAvailableOnBackend
 import me.rerere.rikkahub.data.repository.memoryId
 import me.rerere.rikkahub.data.repository.workspaceToolsReady
 import me.rerere.rikkahub.data.skills.SkillManager
+import me.rerere.rikkahub.service.BackgroundShellManager
 import java.io.File
 import kotlin.uuid.Uuid
 
@@ -78,6 +79,9 @@ internal fun canReadToolOutputs(
     workspaceTools.isNotEmpty() &&
     workspaceHasRootfs
 
+// fork: 后台 shell 任务归属父会话，子代理不拿这两个工具
+private val BACKGROUND_SHELL_TOOLS = setOf("workspace_shell_output", "workspace_shell_kill")
+
 class InvalidMcpServerNamesException(val names: List<String>) :
     IllegalStateException("Invalid MCP server names: ${names.joinToString(", ")}")
 
@@ -91,6 +95,7 @@ class ChatToolFactory(
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
     private val subagentRunner: me.rerere.rikkahub.data.ai.subagent.SubagentRunner,
+    private val backgroundShellManager: BackgroundShellManager,
 ) {
     suspend fun createTools(
         settings: Settings,
@@ -108,6 +113,8 @@ class ChatToolFactory(
             workspace = workspace,
             cwd = workspaceCwd,
             runtime = settings.workspaceRuntime,
+            conversationId = conversationId,
+            backgroundShellManager = backgroundShellManager,
         )
         val tools = buildList {
             if (assistant.enableMemory) {
@@ -159,12 +166,20 @@ class ChatToolFactory(
         )
         // fork: 子代理工具。childTools 里不含 subagent_*，避免无限嵌套。
         // 子代理可以额外拿到会话检索/读取工具，用来参考其他聊天。
+        val childBaseTools = if (settings.subagent.enabled && workspaceTools.any { it.name in BACKGROUND_SHELL_TOOLS }) {
+            val plain = createWorkspaceToolsIfReady(
+                workspace = workspace,
+                cwd = workspaceCwd,
+                runtime = settings.workspaceRuntime,
+            ).associateBy { it.name }
+            tools.filter { it.name !in BACKGROUND_SHELL_TOOLS }.map { plain[it.name] ?: it }
+        } else tools
         val childTools = (if (settings.subagent.includeChatHistory) {
-            (tools +
+            (childBaseTools +
                 createConversationReadTool(conversationRepository, assistant.id) +
                 createConversationTools(conversationRepository, assistant.id))
                 .distinctBy { it.name }
-        } else tools).filter { tool ->
+        } else childBaseTools).filter { tool ->
             // 子代理的工具可见性遵循设置，避免开关是摆设
             isSubagentToolAllowed(tool.name, settings.subagent)
         }
@@ -220,6 +235,8 @@ class ChatToolFactory(
         workspace: WorkspaceEntity?,
         cwd: String?,
         runtime: me.rerere.rikkahub.data.datastore.WorkspaceRuntimeSettings,
+        conversationId: Uuid? = null,
+        backgroundShellManager: BackgroundShellManager? = null,
     ): List<Tool> {
         if (workspace == null) return emptyList()
         // 后端先定下来，再按它判断“就绪”和“这个工具在该后端下有没有意义”：
@@ -233,7 +250,11 @@ class ChatToolFactory(
             )
             return emptyList()
         }
-        return createWorkspaceTools(workspace.id, workspaceRepository, cwd, runtime).filter {
+        return createWorkspaceTools(
+            workspace.id, workspaceRepository, cwd, runtime,
+            conversationId = conversationId,
+            backgroundShellManager = backgroundShellManager,
+        ).filter {
             isToolAvailableOnBackend(it.name, backend)
         }
     }
