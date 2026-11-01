@@ -4,6 +4,17 @@
 
 当前能力对比统一见 [FEATURES.md](FEATURES.md)：5 组新增工作流、2 项主要增强、稳定性修复与继承官方的能力分开说明。下面是按版本保留的历史记录，旧版本的行为不代表当前实现。
 
+## fork.41：结束命令时结束整棵进程树（2026-11-01）
+
+- 修复 PRoot 里的命令结束不了：`workspace_job_kill` 返回失败且任务继续运行；`workspace_shell` 超时或取消后命令仍在后台运行；`workspace_shell_kill` 只结束前台子进程，shell 继续执行后面的命令。均在手机上的 fork.40 实测
+- 原因：Android 的 `destroy()`/`destroyForcibly()` 都只发 SIGTERM，PRoot 忽略；ART 屏蔽 SIGQUIT，PRoot 收到 SIGQUIT 结束全部进程的逻辑不会触发；SIGKILL PRoot 只会让命令脱离跟踪继续运行
+- 新增 `ProotProcess`：按启动时的环境变量标记找到 PRoot，信号直接发给被跟踪的进程（父进程在前），由 `--kill-on-exit` 带走其余进程；每次发信号前重读 `/proc`，不会打到被复用的进程号
+- 后台命令与任务在 TERM trap 下运行：收到结束请求后不再执行剩余命令，等已启动的进程收尾，以 143 退出
+- 跟进官方 master `5ad19405`（模型选择面板多关键词搜索）
+- 测试：官方 `MediaCreationRepositoryTest` 关库前不取消 Room 的失效监听，曾让一次模拟器测试中途崩溃；现在关库前先 invalidate
+- GitHub Actions run 41294941469：JVM 1352 项 0 失败（新增 `ProotProcessTest` 10 项，含 2 项真实 bash 信号测试）、模拟器 50 项全过、R8 + lintVital 正式构建通过
+- 版本 3.1.1-fork.41 / 3000045，schema 34 不变；APK 18,922,536 B，SHA256 a16a8eec9758765559b290064f6a7c99a2bab205d5874a24b884df3d555d9731；详见 [RELEASE-fork41.md](RELEASE-fork41.md)
+
 ## fork.40：带上官方后台命令预览（2026-11-01）
 
 - 在 fork.39 上带入官方未合入 master 的 `feat/background-shell`（`8a472304`、`d7627eff`）作为预览：`workspace_shell` 的 `run_in_background`、`workspace_shell_output`、`workspace_shell_kill`，命令结束后经会话收件箱主动通知模型

@@ -1,6 +1,6 @@
 # 相比官方 3.1.1：新增工作流、功能增强与限制
 
-对比功能增量的基线为官方 **3.1.1 / `ad2c4430`**；当前 **`3.1.1-fork.40 / 3000044`** 已跟进官方 master **`a5db9c9b`（2026-10-29）**，另带官方预览分支 `feat/background-shell`，数据库 schema 34。[本轮更新与实际验证](RELEASE-fork40.md)。不沿用早期版本的“官方没有”结论。
+对比功能增量的基线为官方 **3.1.1 / `ad2c4430`**；当前 **`3.1.1-fork.41 / 3000045`** 已跟进官方 master **`5ad19405`（2026-11-01）**，另带官方预览分支 `feat/background-shell`，数据库 schema 34。[本轮更新与实际验证](RELEASE-fork41.md)。不沿用早期版本的“官方没有”结论。
 
 ## 怎样数功能？
 
@@ -28,7 +28,7 @@
 
 **本分支增加**：`workspace_job_start/status/kill`，启动后立即返回任务 ID，之后查询状态、日志或停止任务。默认/最大命令超时可配置，0 表示不限。本地后台任务申请前台服务与 wakelock；启动被拒绝时不放出无保护的任务。
 
-fork.40 另带官方预览的后台命令（`workspace_shell` 的 `run_in_background`，配 `workspace_shell_output/kill`），属于官方能力，不计入本分支新增。两者并存：官方后台命令归属当前会话，结束后主动通知模型，只在本地 Rootfs 提供，子代理不拿；`workspace_job` 是可跨会话查询的独立任务，也支持 HTTP 远程执行。
+fork.40 起另带官方预览的后台命令（`workspace_shell` 的 `run_in_background`，配 `workspace_shell_output/kill`），属于官方能力，不计入本分支新增。两者并存：官方后台命令归属当前会话，结束后主动通知模型，只在本地 Rootfs 提供，子代理不拿；`workspace_job` 是可跨会话查询的独立任务，也支持 HTTP 远程执行。
 
 边界：本地 Rootfs 与 HTTP 执行后端支持，SSH 工作区没有 job 通道。App 重启后历史记录不等于还持有进程，不能用旧 PID 不加校验地接管或杀任务。前台服务也不等于锁屏永不掉线。
 
@@ -85,6 +85,8 @@ fork.40 另带官方预览的后台命令（`workspace_shell` 的 `run_in_backgr
 
 流式 1.5 秒节流落库、节点差分写入、超大消息完整分片回退、跨分支备份 staging 对齐、用量表归一化、记忆路径冲突保留、FTS 自检与对齐、工具全文可读性、技能元数据校验、通知身份和生命周期、SSH/HTTP 路由边界等。
 
+fork.41 修复 PRoot 里的命令结束不了：停止任务、shell 超时与取消、结束后台命令时，结束命令启动的整棵进程树，见 [RELEASE-fork41.md](RELEASE-fork41.md)。
+
 fork.38 还用真实 Android 原生窗口发现了 requery 的特殊错误文本：只在精确的 `Couldn't read row N column M` 与 `CursorWindow.nativeGet*` 堆栈同时匹配时回退，分片失败仍整体抛错。没有新增 UI 懒分页，不能承诺无限大历史不 OOM。
 
 ## 来自官方，不计入分支新增
@@ -93,8 +95,8 @@ fork.38 还用真实 Android 原生窗口发现了 requery 的特殊错误文本
 
 ## 验证与取舍
 
-最终全模块 JVM **1392 项登记，1391 通过、零失败、1 项可选 PDF 语料测试跳过**；Android API34 x86_64/KVM **50 项全部通过**；Python 11、SQLite 模拟 38 及 Unicode 分片检查通过；正式 R8 与 lintVital 已执行通过。用户真机生产数据库升级、厂商通知与锁屏保活未验。
+fork.41（GitHub Actions run 41294941469）：全模块 JVM **1352 项，1351 通过、零失败、1 项跳过（`PdfCorpusTest.extractCorpus`）**；Android API34 x86_64/KVM **50 项全部通过**；正式 R8 与 lintVital 通过。fork.38 另做过 Python 11、SQLite 模拟 38 及 Unicode 分片检查。用户真机生产数据库升级、厂商通知与锁屏保活未验。
 
 这个分支用更多设置、工具和后台逻辑换取可操作性；不提升模型本身的智力，也不保证更快或更便宜。不需要这些增量时，官方版更省心。
 
-[本版更新与验收](RELEASE-fork38.md) · [历史记录](CHANGES.md) · [维护方法](README.md) · [修改声明](../NOTICE.md)
+[本版更新与验收](RELEASE-fork41.md) · [历史记录](CHANGES.md) · [维护方法](README.md) · [修改声明](../NOTICE.md)

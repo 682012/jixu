@@ -1,0 +1,80 @@
+{
+ "version": "3.1.1-fork.41",
+ "versionCode": 3000045,
+ "schema": 34,
+ "base": {
+  "release": "v3.1.1-fork.40",
+  "commit": "d8028934e4565be5ca0d45f3a370e04a6a0432c3"
+ },
+ "upstreamMaster": "5ad19405c1a14899c69bb92e249a3adb3f65fbbd",
+ "preview": {
+  "branch": "feat/background-shell",
+  "commits": [
+   "8a472304b3c8289bcd79ae46e24591a3756b86a5",
+   "d7627effda611a4e3256d43f12aa7367ae494f60"
+  ]
+ },
+ "buildCommit": "3bdd2fed1bf102b01d39ac1434c0275105c24660",
+ "ci": {
+  "workflow": "Fork Verify",
+  "run": 41294941469,
+  "release": "success",
+  "jvm": "success",
+  "instrumented": "success"
+ },
+ "jvm": {
+  "suites": 198,
+  "tests": 1352,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 1,
+  "skippedTests": [
+   "me.rerere.document.pdf.PdfCorpusTest.extractCorpus"
+  ],
+  "newTests": {
+   "me.rerere.workspace.ProotProcessTest": {
+    "tests": 10,
+    "failed": 0,
+    "skipped": 0
+   }
+  }
+ },
+ "instrumented": {
+  "api": 34,
+  "abi": "x86_64",
+  "suites": 13,
+  "tests": 50,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "earlierFlakyRun": {
+   "run": 41293917531,
+   "failed": "RetryDelayUiTest",
+   "ran": "48/50",
+   "cause": "MediaCreationRepositoryTest closed Room before its paging invalidation observer ran",
+   "fix": "invalidate the paging source before closing (test only)"
+  }
+ },
+ "apk": {
+  "file": "rikkahub-3.1.1-fork.41.apk",
+  "bytes": 18922536,
+  "sha256": "a16a8eec9758765559b290064f6a7c99a2bab205d5874a24b884df3d555d9731",
+  "certSha256": "cb897a361d49933cc7d033b7ff05b95fad6483c18bb4134b10119b0f2715bf89",
+  "abis": [
+   "arm64-v8a",
+   "x86_64"
+  ],
+  "r8": true,
+  "lintVital": true
+ },
+ "fix": {
+  "prootKill": {
+   "reproducedOnDevice": "3.1.1-fork.40",
+   "deviceRetestWithFix": false,
+   "negativeControls": "trap without wait / no trap fail the background-cleanup test (local)"
+  }
+ },
+ "knownIssues": [
+  "commands inherit the SIGPIPE mask blocked by ART; pipeline producers print Broken pipe and exit 1"
+ ]
+}
