@@ -89,7 +89,7 @@ class CompactMcpToolsTest {
 
     private fun JsonObject.str(key: String): String = this[key]!!.jsonPrimitive.content
 
-    private fun JsonObject.int(key: String): Int = this[key]!!.jsonPrimitive.int
+    private fun JsonObject.int(key: String): Int = this[key]!!.jsonPrimitive.content.toInt()
 
     private fun JsonObject.tools(): JsonArray = this["tools"]!!.jsonArray
 
