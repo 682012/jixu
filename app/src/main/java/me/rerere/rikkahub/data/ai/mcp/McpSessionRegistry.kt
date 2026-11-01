@@ -501,11 +501,15 @@ private fun mergeTools(storedTools: List<McpTool>, serverTools: List<Tool>): Lis
         toolsByName[serverTool.name]?.copy(
             description = serverTool.description,
             inputSchema = serverTool.inputSchema.toSchema(),
+            readOnlyHint = serverTool.annotations?.readOnlyHint,
+            idempotentHint = serverTool.annotations?.idempotentHint,
         ) ?: McpTool(
             name = serverTool.name,
             description = serverTool.description,
             enable = true,
             inputSchema = serverTool.inputSchema.toSchema(),
+            readOnlyHint = serverTool.annotations?.readOnlyHint,
+            idempotentHint = serverTool.annotations?.idempotentHint,
         )
     }
 }

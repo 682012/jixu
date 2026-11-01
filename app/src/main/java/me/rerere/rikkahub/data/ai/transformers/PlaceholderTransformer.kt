@@ -142,6 +142,7 @@ object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
         ctx: TransformerContext,
         settingsStore: SettingsStore
     ): String {
+        if ('{' !in text) return text
         var result = text
 
         val ctx = PlaceholderCtx(
@@ -151,6 +152,7 @@ object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
             assistant = ctx.assistant
         )
         defaultProvider.placeholders.forEach { (key, placeholderInfo) ->
+            if (!result.contains("{$key}", ignoreCase = true)) return@forEach
             val value = placeholderInfo.resolver(ctx)
             result = result
                 .replace(oldValue = "{{$key}}", newValue = value, ignoreCase = true)
