@@ -53,7 +53,7 @@ fork.39 的全部内容（已跟进官方 master `a5db9c9b`，2026-10-29），�
 - 大小：`18,925,876` 字节（约 18.0 MiB）
 - SHA-256：`58392310fcbceb70fcab06e4728ca6575ffa6746ef49da5ea98200858017d80e`
 - 签名证书 SHA-256：`cb897a361d49933cc7d033b7ff05b95fad6483c18bb4134b10119b0f2715bf89`，与 fork.38、fork.39 一致
-- 构建源码：`2b15b6ec`；tag `v3.1.1-fork.40` 指向其后只改说明文件的提交
+- 构建源码：`2b15b6ec`；tag `v3.1.1-fork.40` 指向其后的提交，只多了说明文件和仓库缓存清理（`ebd5502f`），构建用到的源码与 `2b15b6ec` 一致
 - [固定版本 Release](https://github.com/682012/rikkahub/releases/tag/v3.1.1-fork.40) · [下载 APK](https://github.com/682012/rikkahub/releases/download/v3.1.1-fork.40/rikkahub-3.1.1-fork.40.apk) · [机器可读验收](verification/fork40.json)
 
 旧版本 Release 全部保留，不被覆盖。
