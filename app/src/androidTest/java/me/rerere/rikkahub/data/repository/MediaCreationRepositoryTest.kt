@@ -185,8 +185,14 @@ class MediaCreationRepositoryTest {
 
     // 时间线上每一项显示的提示词和「第几个 / 共几个」版本，顺序和界面一致（最新的一项在前）
     private suspend fun timeline(): List<String> {
-        val result = dao.nodePagingSource(session.id.toString())
-            .load(PagingSource.LoadParams.Refresh(key = null, loadSize = 50, placeholdersEnabled = true))
+        val source = dao.nodePagingSource(session.id.toString())
+        // load() 会在数据库的协程作用域里启动失效监听, 用完先 invalidate 取消它;
+        // 否则 @After 关库后监听才开始运行时会抛 "Database is closed", 打断之后运行的测试
+        val result = try {
+            source.load(PagingSource.LoadParams.Refresh(key = null, loadSize = 50, placeholdersEnabled = true))
+        } finally {
+            source.invalidate()
+        }
         return (result as PagingSource.LoadResult.Page).data.map {
             "${it.record.prompt} ${it.versionIndex + 1}/${it.versionCount}"
         }
