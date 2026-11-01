@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -232,9 +233,9 @@ private fun createGrepTool(
                 put("output_mode", buildJsonObject {
                     put("type", "string")
                     put("enum", buildJsonArray {
-                        add("files_with_matches")
-                        add("content")
-                        add("count")
+                        add(JsonPrimitive("files_with_matches"))
+                        add(JsonPrimitive("content"))
+                        add(JsonPrimitive("count"))
                     })
                     put("description", "files_with_matches (default) lists paths, content prints path:line:text, count prints path:count")
                 })
