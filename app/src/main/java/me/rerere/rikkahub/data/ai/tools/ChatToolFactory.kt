@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.Tool
+import me.rerere.ai.core.ToolExecutionMode
+import me.rerere.ai.agent.createToolBatch
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -27,12 +29,6 @@ import java.io.File
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatToolFactory"
-private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
-private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
-
-// 搜索结果的体积由用户设置的结果数决定，且结果列表 UI 与引用跳转都依赖完整的 JSON 结构，不参与截断
-private val TOOLS_WITHOUT_OUTPUT_TRUNCATION = setOf("search_web")
-
 internal fun shouldUseExternalWebSearch(assistant: Assistant, model: Model): Boolean {
     return assistant.enableWebSearch && BuiltInTools.Search !in model.tools
 }
@@ -152,83 +148,55 @@ class ChatToolFactory(
                         description = tool.description ?: "",
                         parameters = { tool.inputSchema },
                         needsApproval = { tool.needsApproval },
+                        executionMode = when {
+                            tool.readOnlyHint == true && tool.idempotentHint == true -> ToolExecutionMode.PARALLEL_DEDUPLICATED
+                            tool.readOnlyHint == true -> ToolExecutionMode.PARALLEL
+                            else -> ToolExecutionMode.SERIAL
+                        },
                         execute = { mcpManager.callTool(serverId, tool.name, it.jsonObject) },
                     )
                 )
             }
         }
-        // 过长的输出存成文件让模型用 shell 按需读取；没有 shell / 读不到本地文件区时只能原样返回。
-        // 文件放在本机 filesDir，只有 LOCAL Rootfs 挂载了 /tool_outputs：HTTP 远程与 SSH 都读不到。
-        val canReadLocalOutputs = canReadToolOutputs(
-            backend = backend,
-            workspaceTools = workspaceTools,
-            workspaceHasRootfs = workspace?.capabilities()?.rootfs == true,
-        )
-        // fork: 子代理工具。childTools 里不含 subagent_*，避免无限嵌套。
-        // 子代理可以额外拿到会话检索/读取工具，用来参考其他聊天。
+        // External schemas are discovered lazily only when their catalog becomes large.
+        // Native tools have explicit local scheduling metadata; unknown MCP tools remain serial.
+        val outputOwner = "assistant:${assistant.id}:conversation:${conversationId ?: "no-conversation"}"
+        val outputStore = ToolOutputStore(File(context.filesDir, FileFolders.TOOL_OUTPUTS), outputOwner)
+        val baseTools = tools.map(::withBuiltinExecutionMode)
         val childBaseTools = if (settings.subagent.enabled && workspaceTools.any { it.name in BACKGROUND_SHELL_TOOLS }) {
             val plain = createWorkspaceToolsIfReady(
                 workspace = workspace,
                 cwd = workspaceCwd,
                 runtime = settings.workspaceRuntime,
             ).associateBy { it.name }
-            tools.filter { it.name !in BACKGROUND_SHELL_TOOLS }.map { plain[it.name] ?: it }
-        } else tools
-        val childTools = (if (settings.subagent.includeChatHistory) {
+            baseTools.filter { it.name !in BACKGROUND_SHELL_TOOLS }.map { withBuiltinExecutionMode(plain[it.name] ?: it) }
+        } else baseTools
+        // Apply child visibility BEFORE proxying: no generic gateway can bypass includeMcp=false.
+        val childVisible = (if (settings.subagent.includeChatHistory) {
             (childBaseTools +
                 createConversationReadTool(conversationRepository, assistant.id) +
                 createConversationTools(conversationRepository, assistant.id))
                 .distinctBy { it.name }
-        } else childBaseTools).filter { tool ->
-            // 子代理的工具可见性遵循设置，避免开关是摆设
-            isSubagentToolAllowed(tool.name, settings.subagent)
-        }
-        // 父侧用 canReadLocalOutputs 判定；子代理还要额外确认自己真的拿到了能读 /tool_outputs 的工具。
-        val childToolsForSubagent =
-            if (shouldTruncateChildToolOutput(canReadLocalOutputs, childTools)) {
-                childTools.map(::withOutputTruncation)
-            } else childTools
-        val withSubagent = if (settings.subagent.enabled) {
-            tools + createSubagentTools(
+        } else childBaseTools).filter { tool -> isSubagentToolAllowed(tool.name, settings.subagent) }
+        val childTools = prepareEfficientTools(childVisible.map(::withBuiltinExecutionMode), outputStore)
+        val parentTools = if (settings.subagent.enabled) {
+            baseTools + createSubagentTools(
                 runner = subagentRunner,
-                childTools = childToolsForSubagent,
+                childTools = childTools,
                 settings = settings.subagent,
                 parentModelId = model.id,
                 conversationId = conversationId,
             )
-        } else tools
-        return if (canReadLocalOutputs) withSubagent.map(::withOutputTruncation) else withSubagent
+        } else baseTools
+        return prepareEfficientTools(parentTools, outputStore)
     }
 
-    private fun withOutputTruncation(tool: Tool): Tool {
-        if (tool.name in TOOLS_WITHOUT_OUTPUT_TRUNCATION) return tool
-        val execute = tool.execute
-        return tool.copy(execute = { truncateOutput(execute(it)) })
-    }
-
-    private fun truncateOutput(output: List<UIMessagePart>): List<UIMessagePart> {
-        val textParts = output.filterIsInstance<UIMessagePart.Text>()
-        val totalChars = textParts.sumOf { it.text.length }
-        if (totalChars <= MAX_TOOL_OUTPUT_CHARS) return output
-
-        val fileName = "${Uuid.random()}.txt"
-        Log.i(TAG, "truncateOutput: saving $totalChars chars to $fileName")
-        val fullText = textParts.joinToString("\n") { it.text }
-        val outputDir = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() }
-        File(outputDir, fileName).writeText(fullText)
-
-        return listOf(
-            UIMessagePart.Text(
-                buildString {
-                    appendLine("[Tool output truncated: $totalChars characters total]")
-                    appendLine("Full output saved to: /tool_outputs/$fileName")
-                    appendLine("Use shell to read: `cat /tool_outputs/$fileName`")
-                    appendLine("Use shell to search: `grep \"pattern\" /tool_outputs/$fileName`")
-                    appendLine()
-                    append(fullText.take(TOOL_OUTPUT_PREVIEW_CHARS))
-                }
-            )
-        ) + output.filter { it !is UIMessagePart.Text }
+    private fun prepareEfficientTools(tools: List<Tool>, outputStore: ToolOutputStore): List<Tool> {
+        val compact = compactMcpTools(tools)
+        val readerName = uniqueToolName(TOOL_OUTPUT_READ_TOOL_NAME, compact.map { it.name }.toSet())
+        val readable = compact.map(outputStore::wrap) + outputStore.createReaderTool(readerName)
+        // A single structured call can execute an already planned set without extra model round trips.
+        return (readable + outputStore.wrap(createToolBatch(readable))).sortedBy { it.name }
     }
 
     private suspend fun createWorkspaceToolsIfReady(

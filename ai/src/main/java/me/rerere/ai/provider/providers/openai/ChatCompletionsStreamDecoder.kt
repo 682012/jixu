@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
+import java.util.UUID
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -35,6 +36,18 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     private var finishReason: String? = null
     private var finished = false
 
+    /**
+     * 没有响应 id 时用于合成工具调用 id 的随机后缀。
+     *
+     * 每条响应流一个解码器实例，所以这个值等价于"每次响应"的随机前缀。它在整个响应内保持不变，
+     * 让同一调用的多条增量拿到同一个 id；不同响应（多步 agent 的每一步）则一定不同，
+     * 不会像原先的 `response:tool-0` 那样在会话里跨步骤撞车。
+     */
+    private val fallbackSourceId = "response-${UUID.randomUUID()}"
+
+    /** 首次需要合成 id 时定型：响应 id 已知就用它，否则用本实例的随机前缀。 */
+    private var stableSourceId: String? = null
+
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
@@ -55,10 +68,12 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                         message["tool_calls"]?.jsonArrayOrNull?.forEachIndexed { fallbackIndex, element ->
                             val toolCall = element.jsonObjectOrNull ?: return@forEachIndexed
                             val index = toolCall["index"]?.jsonPrimitive?.intOrNull ?: fallbackIndex
+                            // 空字符串 id 与没有 id 等价：用它当 tool_call_id 会让 tool_result 对不上
                             val toolId = toolCall["id"]?.jsonPrimitive?.contentOrNull
+                                ?.takeIf(String::isNotBlank)
                                 ?.also { toolIdsByIndex[index] = it }
                                 ?: toolIdsByIndex.getOrPut(index) {
-                                    "${responseId ?: "response"}:tool-$index"
+                                    "${toolIdSource()}:tool-$index"
                                 }
                             val function = toolCall["function"]?.jsonObjectOrNull
                             addAll(streamState.append(
@@ -84,6 +99,14 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     }
 
     override fun onClosed(): List<StreamChunk> = finish()
+
+    /**
+     * 本次响应合成 id 用的稳定前缀：拿到响应 id 就用它（保持原有格式），
+     * 否则用本实例的随机前缀；一旦定型不再变化，保证同一响应内 id 稳定。
+     */
+    private fun toolIdSource(): String =
+        stableSourceId ?: (responseId?.takeIf(String::isNotBlank) ?: fallbackSourceId)
+            .also { stableSourceId = it }
 
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()

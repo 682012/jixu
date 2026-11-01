@@ -19,7 +19,7 @@ fun createSkillTools(
     enabledSkills: Set<String>,
     allSkills: List<SkillMetadata>,
 ): List<Tool> {
-    val available = allSkills.filter { it.name in enabledSkills }
+    val available = allSkills.filter { it.name in enabledSkills }.sortedBy { it.name }
     if (available.isEmpty()) return emptyList()
 
     return listOf(
@@ -43,7 +43,7 @@ fun createSkillTools(
                     }
                     append("</available_skills>")
                     if (available.size > MAX_SKILLS_IN_PROMPT) {
-                        appendLine("\n（还有 ${available.size - MAX_SKILLS_IN_PROMPT} 个技能未在清单中展开；需要时用 use_skill 指定名称。）")
+                        appendLine("\nAdditional available skills (load by exact name): " + available.drop(MAX_SKILLS_IN_PROMPT).joinToString(", ") { it.name.escapeXml() })
                     }
                     appendLine()
                 }

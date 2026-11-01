@@ -56,7 +56,10 @@ data class McpTool(
     val name: String = "",
     val description: String? = null,
     val inputSchema: InputSchema? = null,
-    val needsApproval: Boolean = false
+    val needsApproval: Boolean = false,
+    // Unknown/legacy servers are conservative. Only explicit MCP annotations enable read concurrency.
+    val readOnlyHint: Boolean? = null,
+    val idempotentHint: Boolean? = null,
 )
 
 @Serializable

@@ -216,9 +216,9 @@ fun SettingForkPage(vm: SettingVM = koinViewModel()) {
                     )
                     formItem(
                         headlineContent = { Text("最大并发") },
-                        supportingContent = { Text("每个子代理都有独立上下文，建议 2；内存紧张时保持 1。") },
+                        supportingContent = { Text("默认 4，最多 8；每个子代理都有独立上下文，内存紧张时可调低到 1。") },
                     ) {
-                        NumberField(sub.maxConcurrent) { v -> updateSub { it.copy(maxConcurrent = v.coerceIn(1, 4)) } }
+                        NumberField(sub.maxConcurrent) { v -> updateSub { it.copy(maxConcurrent = v.coerceIn(1, 8)) } }
                     }
                     formItem(headlineContent = { Text("最大步数") }) {
                         NumberField(sub.maxSteps) { v -> updateSub { it.copy(maxSteps = v.coerceIn(1, 120)) } }

@@ -122,6 +122,7 @@ class ChatService(
     private val filesManager: FilesManager,
     private val folderRepository: FolderRepository,
     private val backgroundShellManager: BackgroundShellManager,
+    private val subagentRunner: me.rerere.rikkahub.data.ai.subagent.SubagentRunner,
 ) {
     /** 一轮生成的结果 */
     private sealed interface TurnResult {
@@ -194,6 +195,10 @@ class ChatService(
     fun cleanup() = runCatching { sessionManager.cleanup() }
 
     init {
+        // Queue completion notices only. An idle parent does not incur an unsolicited model request.
+        subagentRunner.noticeSink = { event ->
+            sessionManager.getOrCreate(event.conversationId).inbox.post(event.key, event.notice)
+        }
         appScope.launch {
             backgroundShellManager.noticeEvents.collect { event ->
                 when (event) {
@@ -714,6 +719,7 @@ class ChatService(
                 takePendingParts = session.inbox::takeNotices,
             )
             var finishReason: AgentFinishReason? = null
+            val persistedToolStates = HashMap<String, Pair<kotlin.time.Instant?, Boolean>>()
             try {
                 runAgent(request, hooks).flowOn(Dispatchers.IO).collect { event ->
                     when (event) {
@@ -722,7 +728,22 @@ class ChatService(
                             session.processingStatus.value = null
                             session.update { it.upsertMessage(replyNodeId, event.message) }
                             // 流式内容此刻只在内存里，定时落库避免强杀丢掉整段回复
-                            persistStreamingThrottled(session)
+                            val tools = event.message.getTools()
+                            val lifecycleChanged = tools.any { tool ->
+                                val previous = persistedToolStates[tool.toolCallId]
+                                (tool.startedAt != null && previous?.first != tool.startedAt) ||
+                                    (tool.isExecuted && previous?.second != true)
+                            }
+                            if (lifecycleChanged) {
+                                // Commit start before effects and each completed result without stream throttling.
+                                // AgentLoop waits for this collector, so a killed process cannot silently replay a write.
+                                session.flush()
+                                tools.forEach { tool ->
+                                    persistedToolStates[tool.toolCallId] = tool.startedAt to tool.isExecuted
+                                }
+                            } else {
+                                persistStreamingThrottled(session)
+                            }
                             session.replyMessageId.value = event.message.id
                             // 通知等边缘副作用由 ChatNotificationManager 消费；
                             // tryEmit 不挂起，事件丢失只影响单次通知更新，不能反压生成链

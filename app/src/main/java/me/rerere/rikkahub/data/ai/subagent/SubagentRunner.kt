@@ -12,6 +12,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
 
 private const val TAG = "SubagentRunner"
-private const val HARD_MAX_CONCURRENT = 4
+private const val HARD_MAX_CONCURRENT = 8
 private const val HARD_MAX_STEPS = 120
 
 /**
@@ -69,7 +71,31 @@ class SubagentRunner(
     private val permits = SubagentPermitPool()
     private val state = MutableStateFlow<List<SubagentTask>>(emptyList())
 
+    /** 已经发过终态通知的 task；集合是"同一 task 只通知一次"的凭据。 */
+    private val notified = ConcurrentHashMap.newKeySet<String>()
+
+    /** 结果交付记录，按 task scope；subagent_wait 与 subagent_result 共用同一份。 */
+    private val delivery = SubagentDeliveryRegistry()
+
+    /**
+     * 终态通知投递口：由 ChatService 在 init 里接到父会话的 ConversationInbox。
+     *
+     * 期望实现是"只放进收件箱"——`sessionManager.getOrCreate(id).inbox.post(key, notice)`：
+     * 父会话正在生成时，下一步请求模型前自然取走；空闲时留在队列里，等用户下一条消息一起发出。
+     * 不要在这里调 [me.rerere.rikkahub.service.ChatService.postNotice]，那条路径会 dispatchInbox，
+     * 子代理结束会自己开父会话的一轮生成，等于替用户发起对话。
+     *
+     * 用可变注入而不是构造参数：ChatService 依赖 ChatToolFactory → SubagentRunner，
+     * 构造期互相依赖会成环。未接线时通知只写日志，任务本身和 result/wait 读取都不受影响。
+     */
+    @Volatile
+    var noticeSink: ((SubagentNoticeEvent) -> Unit)? = null
+
     fun observe(): StateFlow<List<SubagentTask>> = state.asStateFlow()
+
+    fun markDelivered(taskId: String) = delivery.markDelivered(taskId)
+
+    fun isDelivered(taskId: String): Boolean = delivery.isDelivered(taskId)
 
     fun get(id: String): SubagentTask? = tasks[id]
 
@@ -192,14 +218,32 @@ class SubagentRunner(
         return true
     }
 
-    suspend fun await(id: String, timeoutSec: Int = 0): SubagentTask? {
-        val deadline = if (timeoutSec <= 0) Long.MAX_VALUE else System.currentTimeMillis() + timeoutSec * 1000L
-        while (System.currentTimeMillis() < deadline) {
+    suspend fun await(id: String, timeoutSec: Int = 0): SubagentTask? =
+        awaitUntil(id, deadlineAfter(timeoutSec))
+
+    /**
+     * 同时等待多个任务，共用一个 timeout（不是 8 × timeout 串行），返回顺序与 [ids] 一致。
+     *
+     * 调用方负责先校验全部 id 的归属；这里只等待已经在册的任务。
+     */
+    suspend fun awaitAll(ids: List<String>, timeoutSec: Int = 0): List<SubagentTask?> {
+        if (ids.isEmpty()) return emptyList()
+        val deadline = deadlineAfter(timeoutSec)
+        return coroutineScope {
+            val waiting = ids.distinct().associateWith { id -> async { awaitUntil(id, deadline) } }
+            ids.map { id -> waiting.getValue(id).await() }
+        }
+    }
+
+    private fun deadlineAfter(timeoutSec: Int): Long =
+        if (timeoutSec <= 0) Long.MAX_VALUE else System.currentTimeMillis() + timeoutSec * 1000L
+
+    private suspend fun awaitUntil(id: String, deadline: Long): SubagentTask? {
+        while (true) {
             val task = tasks[id] ?: return null
-            if (task.isFinished) return task
+            if (task.isFinished || System.currentTimeMillis() >= deadline) return task
             delay(250)
         }
-        return tasks[id]
     }
 
     private suspend fun runOnce(
@@ -283,7 +327,12 @@ class SubagentRunner(
         val cutoff = if (keepDays > 0) System.currentTimeMillis() - keepDays * 86_400_000L else Long.MIN_VALUE
         val completed = tasks.values.filter { it.isFinished }.sortedByDescending { it.createdAt }
         completed.forEachIndexed { index, task ->
-            if (index >= 100 || task.createdAt < cutoff) tasks.remove(task.id, task)
+            if (index >= 100 || task.createdAt < cutoff) {
+                if (tasks.remove(task.id, task)) {
+                    notified.remove(task.id)
+                    delivery.forget(task.id)
+                }
+            }
         }
         if (keepDays > 0) runCatching {
             File(context.filesDir, "subagents").listFiles().orEmpty().forEach { dir ->
@@ -295,8 +344,54 @@ class SubagentRunner(
     }
 
     private fun update(id: String, transform: (SubagentTask) -> SubagentTask) {
-        tasks.computeIfPresent(id) { _, old -> transform(old) }
+        var finished: SubagentTask? = null
+        tasks.computeIfPresent(id) { _, old ->
+            val updated = transform(old)
+            if (isSubagentTerminalTransition(old, updated)) finished = updated
+            updated
+        }
         publish()
+        finished?.let(::notifyFinished)
+    }
+
+    /**
+     * 终态通知：同一 task 只会走到这里一次（[notified] 判定）。
+     *
+     * 只投递通知，不启动父会话生成、不跨会话发送；正文留在结果文件里等 subagent_result 分页读。
+     */
+    private fun notifyFinished(task: SubagentTask) {
+        if (!notified.add(task.id)) return
+        val conversationId = task.conversationId ?: return
+        val sink = noticeSink
+        if (sink == null) {
+            Log.i(TAG, "subagent ${task.id} finished (${task.status}); no notice sink wired")
+            return
+        }
+        runCatching {
+            sink(
+                SubagentNoticeEvent(
+                    conversationId = conversationId,
+                    key = subagentNoticeKey(task.id),
+                    notice = buildSubagentNotice(task, resultText(task)),
+                )
+            )
+        }.onFailure { Log.w(TAG, "subagent ${task.id} notice failed", it) }
+    }
+
+    /** 结果全文：内存优先，其次结果文件。所有状态可用（失败/超时/取消保留部分输出）。 */
+    fun resultText(task: SubagentTask): String =
+        task.result ?: task.resultPath?.let { path -> File(path).takeIf { it.isFile }?.readText() } ?: ""
+
+    fun resultChars(taskId: String): Int = tasks[taskId]?.let { resultText(it).length } ?: 0
+
+    /** 按 offset/limit 切一段结果；任务不存在返回 null。读结果不会消耗它。 */
+    fun readResult(
+        taskId: String,
+        offset: Int = 0,
+        limit: Int = SUBAGENT_RESULT_DEFAULT_LIMIT,
+    ): SubagentResultPage? {
+        val task = tasks[taskId] ?: return null
+        return subagentResultPage(task = task, full = resultText(task), offset = offset, limit = limit)
     }
 
     private fun publish() {

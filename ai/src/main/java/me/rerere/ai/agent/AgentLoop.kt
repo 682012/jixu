@@ -1,12 +1,19 @@
 package me.rerere.ai.agent
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.ToolExecutionMode
 import me.rerere.ai.core.sum
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.StreamChunkHandler
@@ -168,18 +175,97 @@ internal class AgentLoop(
         return generated
     }
 
-    // 按调用顺序逐个执行，每执行完一个就更新一次，中途取消时已经执行的结果不会丢
+    // Adjacent, explicitly independent calls overlap. Every serial call is a full ordering barrier.
+    // Only the collector coroutine updates the message/emits events; workers report through a channel.
     private suspend fun executeTools() {
-        val tools = checkNotNull(message).getTools().filter { !it.isExecuted }
-        for (tool in tools) {
-            // 只给真正运行的工具计时；开始时先写一次，界面才能在执行中实时显示耗时
-            val runs = tool.approvalState == ToolApprovalState.Auto || tool.approvalState == ToolApprovalState.Approved
-            if (runs) updateTool(tool.toolCallId) { it.copy(startedAt = Clock.System.now(), finishedAt = null) }
-            val output = execute(tool)
+        val pending = checkNotNull(message).getTools().filter { !it.isExecuted }
+        var index = 0
+        while (index < pending.size) {
+            val first = pending[index]
+            if (!canRunInParallel(first)) {
+                executeOne(first)
+                index++
+                continue
+            }
+            val from = index
+            while (index < pending.size && canRunInParallel(pending[index])) index++
+            executeParallel(pending.subList(from, index))
+        }
+    }
+
+    private fun canRunInParallel(tool: UIMessagePart.Tool): Boolean =
+        (tool.approvalState == ToolApprovalState.Auto || tool.approvalState == ToolApprovalState.Approved) &&
+            findTool(tool.toolName)?.executionMode?.allowsParallelExecution() == true &&
+            !(tool.startedAt != null && findTool(tool.toolName)?.executionMode != ToolExecutionMode.PARALLEL_DEDUPLICATED)
+
+    private suspend fun executeOne(tool: UIMessagePart.Tool) {
+        val runs = tool.approvalState == ToolApprovalState.Auto || tool.approvalState == ToolApprovalState.Approved
+        val interrupted = runs && tool.startedAt != null &&
+            findTool(tool.toolName)?.executionMode != ToolExecutionMode.PARALLEL_DEDUPLICATED
+        if (interrupted) {
             updateTool(tool.toolCallId) {
-                it.copy(output = output, finishedAt = if (runs) Clock.System.now() else it.finishedAt)
+                it.copy(output = errorOutput(
+                    "Previous execution was interrupted after it started. Its effects are unknown; " +
+                        "this call was NOT replayed. Inspect the target state before issuing a new call."
+                ), finishedAt = Clock.System.now())
+            }
+            return
+        }
+        if (runs) updateTool(tool.toolCallId) { it.copy(startedAt = Clock.System.now(), finishedAt = null) }
+        val output = execute(tool)
+        updateTool(tool.toolCallId) {
+            it.copy(output = output, finishedAt = if (runs) Clock.System.now() else it.finishedAt)
+        }
+    }
+
+    private sealed interface ToolProgress {
+        data class Started(val calls: List<UIMessagePart.Tool>, val acknowledged: CompletableDeferred<Unit>) : ToolProgress
+        data class Completed(val calls: List<UIMessagePart.Tool>, val output: List<UIMessagePart>) : ToolProgress
+        data class Cancelled(val error: CancellationException) : ToolProgress
+    }
+
+    private suspend fun executeParallel(calls: List<UIMessagePart.Tool>) = coroutineScope {
+        val groups = LinkedHashMap<String, MutableList<UIMessagePart.Tool>>()
+        calls.forEachIndexed { index, call ->
+            val args = if (findTool(call.toolName)?.executionMode == ToolExecutionMode.PARALLEL_DEDUPLICATED) {
+                canonicalToolArguments(call.input)
+            } else null
+            val key = if (args == null) "unique:$index" else "${call.toolName}\n$args"
+            groups.getOrPut(key) { mutableListOf() }.add(call)
+        }
+        val progress = Channel<ToolProgress>(Channel.UNLIMITED)
+        val permits = Semaphore(8)
+        groups.values.forEach { group ->
+            launch {
+                permits.withPermit {
+                    val acknowledged = CompletableDeferred<Unit>()
+                    progress.send(ToolProgress.Started(group, acknowledged))
+                    acknowledged.await()
+                    try {
+                        progress.send(ToolProgress.Completed(group, execute(group.first())))
+                    } catch (e: CancellationException) {
+                        // A tool may cancel itself without cancelling its siblings; wake the collector too.
+                        progress.trySend(ToolProgress.Cancelled(e))
+                        throw e
+                    }
+                }
             }
         }
+        repeat(groups.size * 2) {
+            when (val event = progress.receive()) {
+                is ToolProgress.Started -> {
+                    event.calls.forEach { call ->
+                        updateTool(call.toolCallId) { it.copy(startedAt = Clock.System.now(), finishedAt = null) }
+                    }
+                    event.acknowledged.complete(Unit)
+                }
+                is ToolProgress.Completed -> event.calls.forEach { call ->
+                    updateTool(call.toolCallId) { it.copy(output = event.output, finishedAt = Clock.System.now()) }
+                }
+                is ToolProgress.Cancelled -> throw event.error
+            }
+        }
+        progress.close()
     }
 
     private suspend fun updateTool(toolCallId: String, transform: (UIMessagePart.Tool) -> UIMessagePart.Tool) {
@@ -213,7 +299,7 @@ internal class AgentLoop(
         // 取消必须向上传播，否则停止生成会被误报为工具执行错误
         throw e
     } catch (e: Throwable) {
-        errorOutput("[${e.javaClass.name}] ${e.message}\n${e.stackTraceToString()}")
+        errorOutput("[${e.javaClass.name}] ${(e.message ?: "Tool execution failed").take(2_000)}")
     }
 
     private fun findTool(name: String) = request.tools.find { it.name == name }

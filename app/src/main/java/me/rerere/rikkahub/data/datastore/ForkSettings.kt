@@ -54,7 +54,8 @@ data class AutoCompressSettings(
 @Serializable
 data class SubagentSettings(
     val enabled: Boolean = false,
-    val maxConcurrent: Int = 2,
+    /** 同时运行的最大子代理数；硬上限 8（见 SubagentRunner.HARD_MAX_CONCURRENT）。 */
+    val maxConcurrent: Int = 4,
     val maxSteps: Int = 40,
     /** 单个子代理的总超时（秒），0 表示不限制。 */
     val timeoutSec: Int = 900,

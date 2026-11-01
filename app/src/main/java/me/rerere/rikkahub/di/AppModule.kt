@@ -158,6 +158,7 @@ val appModule = module {
             filesManager = get(),
             folderRepository = get(),
             backgroundShellManager = get(),
+            subagentRunner = get(),
         )
     }
 
