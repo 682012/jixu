@@ -20,9 +20,19 @@ import me.rerere.ai.ui.UIMessagePart
 
 private const val MAX_BATCH_CALLS = 16
 
+/**
+ * 不能出现在批内的工具名：
+ * - `tool_batch`：批自身，批内批会形成递归并绕过上限/顺序语义；
+ * - `ask_user`：交互式工具，答案要等用户，批内无法表达"等一半"；
+ * - `run_script`：脚本执行工具，参数是自由文本脚本，批内一次性提交无法逐条审批与审计。
+ *
+ * 这里按字面名字排除（ai 模块不依赖 app 模块的工具常量）；新增同类工具时必须同步这个集合。
+ */
+private val BATCH_EXCLUDED_TOOL_NAMES = setOf("tool_batch", "ask_user", "run_script")
+
 /** One model round trip for a preplanned batch. All arguments/permissions are checked before effects. */
 fun createToolBatch(tools: List<Tool>): Tool {
-    val catalog = tools.filter { it.name != "tool_batch" && it.name != "ask_user" }.associateBy { it.name }
+    val catalog = tools.filter { it.name !in BATCH_EXCLUDED_TOOL_NAMES }.associateBy { it.name }
     fun parse(input: JsonElement): List<BatchCall> {
         val items = (input as? JsonObject)?.get("calls") as? JsonArray
             ?: error("calls must be an array of {name, arguments} objects")
@@ -45,7 +55,8 @@ fun createToolBatch(tools: List<Tool>): Tool {
         description = "Execute 1..16 already planned tool calls in one round trip. Each item has name and arguments. " +
             "Use only tools currently advertised and arguments already known; dependent results require a later call. " +
             "Independent reads overlap (max 8); writes/unknown tools remain ordered barriers. " +
-            "All nested approvals apply. Results preserve call order; do not batch ask_user or tool_batch itself.",
+            "All nested approvals apply. Results preserve call order; member failures come back as an error field " +
+            "and the remaining calls still run. Do not batch ask_user, run_script or tool_batch itself.",
         parameters = {
             InputSchema.Obj(properties = buildJsonObject {
                 put("calls", buildJsonObject {
@@ -66,9 +77,16 @@ fun createToolBatch(tools: List<Tool>): Tool {
                 })
             }, required = listOf("calls"))
         },
-        // Invalid input fails during execution without an approval dead-end. No member has run yet.
+        // 两类失败要分开：解析失败（输入非法）不会执行任何成员，执行阶段 parse 会再抛一次，
+        // 变成错误输出且没有副作用；而成员审批判定失败意味着"不知道要不要审批"，
+        // 必须失败关闭（要求审批），否则一个抛异常的 needsApproval 会让整批静默放行。
         needsApproval = { input ->
-            runCatching { parse(input) }.getOrNull()?.any { it.tool.needsApproval(it.arguments) } ?: false
+            when (val calls = runCatching { parse(input) }.getOrNull()) {
+                null -> false
+                else -> calls.any { call ->
+                    runCatching { call.tool.needsApproval(call.arguments) }.getOrDefault(true)
+                }
+            }
         },
         execute = { input -> executeBatch(parse(input)) },
     )
@@ -127,6 +145,8 @@ private suspend fun executeBatchCall(call: BatchCall): List<UIMessagePart> = try
     call.tool.execute(call.arguments).ifEmpty { listOf(UIMessagePart.Text("(no output)")) }
 } catch (e: CancellationException) {
     throw e
-} catch (e: Exception) {
+} catch (e: Throwable) {
+    // 与 AgentLoop.runTool 一致：Error（模型生成的超大 JSON 导致的 StackOverflowError、超大输出的
+    // OutOfMemoryError）也转成错误输出让模型自我修正，不要让一个成员掀掉整轮。取消仍然向上传播。
     listOf(UIMessagePart.Text(buildJsonObject { put("error", "[${e.javaClass.simpleName}] ${e.message}") }.toString()))
 }

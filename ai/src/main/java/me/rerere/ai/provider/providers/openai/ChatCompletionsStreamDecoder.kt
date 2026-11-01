@@ -29,7 +29,17 @@ import kotlin.time.Clock
 
 internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     private val streamState = ChatCompletionsStreamState()
-    private val toolIdsByIndex = mutableMapOf<Int, String>()
+
+    /**
+     * 合成工具调用 id 的 key → 已确定的调用 id。
+     *
+     * key 是 `index`（Provider 给了 index 时）或 `数组下标:工具名`（缺 index 时），见 [accept]。
+     */
+    private val toolIdsByKey = mutableMapOf<String, String>()
+
+    /** 缺 index 时每个数组下标最近一次用到的 key，让不带名字的续写增量落在同一个调用上。 */
+    private val fallbackKeyByIndex = mutableMapOf<Int, String>()
+
     private val reasoningDetailsByIndex = linkedMapOf<Int, JsonObject>()
     private var responseId: String? = null
     private var responseModel: String? = null
@@ -67,21 +77,33 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
 
                         message["tool_calls"]?.jsonArrayOrNull?.forEachIndexed { fallbackIndex, element ->
                             val toolCall = element.jsonObjectOrNull ?: return@forEachIndexed
-                            val index = toolCall["index"]?.jsonPrimitive?.intOrNull ?: fallbackIndex
+                            val index = toolCall["index"]?.jsonPrimitive?.intOrNull
+                            val function = toolCall["function"]?.jsonObjectOrNull
+                            val functionName = function?.get("name")?.jsonPrimitive?.contentOrNull.orEmpty()
+                            // 合成 id 的 key：有 index 就用 index（保持 `resp-1:tool-0` 的旧格式）。
+                            // 缺 index 的端点每条 chunk 只带一个 tool_call，数组下标永远是 0，
+                            // 只用下标会让不同工具塌成同一个 id（参数拼坏、调用静默丢失），
+                            // 因此把工具名并进 key。续写增量不带名字时沿用该下标最近一次用到的 key。
+                            val key = when {
+                                index != null -> index.toString()
+                                functionName.isNotEmpty() -> "$fallbackIndex:$functionName".also {
+                                    fallbackKeyByIndex[fallbackIndex] = it
+                                }
+                                else -> fallbackKeyByIndex[fallbackIndex] ?: "$fallbackIndex:"
+                            }
                             // 空字符串 id 与没有 id 等价：用它当 tool_call_id 会让 tool_result 对不上
                             val toolId = toolCall["id"]?.jsonPrimitive?.contentOrNull
                                 ?.takeIf(String::isNotBlank)
-                                ?.also { toolIdsByIndex[index] = it }
-                                ?: toolIdsByIndex.getOrPut(index) {
-                                    "${toolIdSource()}:tool-$index"
+                                ?.also { toolIdsByKey[key] = it }
+                                ?: toolIdsByKey.getOrPut(key) {
+                                    "${toolIdSource()}:tool-$key"
                                 }
-                            val function = toolCall["function"]?.jsonObjectOrNull
                             addAll(streamState.append(
                                 UIMessage(
                                     role = MessageRole.ASSISTANT,
                                     parts = listOf(UIMessagePart.Tool(
                                         toolCallId = toolId,
-                                        toolName = function?.get("name")?.jsonPrimitive?.contentOrNull ?: "",
+                                        toolName = functionName,
                                         input = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: "",
                                         output = emptyList(),
                                     )),

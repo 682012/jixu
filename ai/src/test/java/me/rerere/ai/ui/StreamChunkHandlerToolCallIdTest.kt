@@ -260,6 +260,75 @@ class StreamChunkHandlerToolCallIdTest {
         assertEquals("""{"q":"a"}""", tool.input)
     }
 
+    @Test
+    fun `tool call output without a slot in this step is dropped`() {
+        // 第一步：调用生成、执行完成，结果在 part 上
+        var messages = listOf(UIMessage.user("list files"))
+        val firstStep = StreamChunkHandler(model)
+        messages = firstStep.handle(messages, StreamChunk.ToolCallStart("response:tool-0", "shell"))
+        messages = firstStep.handle(
+            messages,
+            StreamChunk.ToolCallDelta("response:tool-0", inputDelta = """{"cmd":"ls"}"""),
+        )
+        messages = firstStep.handle(messages, StreamChunk.ToolCallEnd("response:tool-0"))
+        messages = firstStep.handle(messages, StreamChunk.Finish(finishReason = "tool_calls"))
+        messages = messages.executed("response:tool-0", "old-result")
+
+        // 第二步：本实例只收到输出，没有对应的 Start/Delta（事件顺序异常或重连后补发）
+        val secondStep = StreamChunkHandler(model)
+        messages = secondStep.handle(messages, StreamChunk.ToolCallOutput("response:tool-0", "stale-output"))
+
+        val tools = messages.tools()
+        assertEquals("丢弃不能凭空造一个 part", 1, tools.size)
+        assertEquals(
+            "之前步骤已执行 part 的结果不能被本步的孤儿输出覆盖",
+            "old-result",
+            (tools[0].output.single() as UIMessagePart.Text).text,
+        )
+        assertTrue(tools[0].isExecuted)
+        assertEquals("""{"cmd":"ls"}""", tools[0].input)
+    }
+
+    @Test
+    fun `a reused id with a different tool name starts a new call`() {
+        // Provider 在同一步内把同一个事件 id 复用给另一个工具：这是新调用，不能把
+        // 第二个调用的名字和参数拼到第一个 part 上（那会让第一个调用静默消失）。
+        var messages = listOf(UIMessage.user("run both"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.ToolCallStart("call_1", "shell"))
+        messages = handler.handle(messages, StreamChunk.ToolCallDelta("call_1", inputDelta = """{"cmd":"ls"}"""))
+        messages = handler.handle(messages, StreamChunk.ToolCallStart("call_1", "read_file"))
+        messages = handler.handle(messages, StreamChunk.ToolCallDelta("call_1", inputDelta = """{"path":"a.txt"}"""))
+
+        val tools = messages.tools()
+        assertEquals("不同工具名必须分成两个调用", 2, tools.size)
+        assertEquals("shell", tools[0].toolName)
+        assertEquals("""{"cmd":"ls"}""", tools[0].input)
+        assertEquals("read_file", tools[1].toolName)
+        assertEquals("""{"path":"a.txt"}""", tools[1].input)
+        assertNotEquals(tools[0].toolCallId, tools[1].toolCallId)
+    }
+
+    @Test
+    fun `a start without a name does not split the call`() {
+        // 名字在 Delta 里到达的 Provider：Start 不带名字之后再收到一次带名字的 Start，
+        // 无法判断是不是新调用，仍按同一步的重复事件处理（保持原有行为）。
+        var messages = listOf(UIMessage.user("search"))
+        val handler = StreamChunkHandler(model)
+
+        messages = handler.handle(messages, StreamChunk.ToolCallStart("call_1", ""))
+        messages = handler.handle(messages, StreamChunk.ToolCallStart("call_1", "search"))
+        messages = handler.handle(
+            messages,
+            StreamChunk.ToolCallDelta("call_1", toolNameDelta = "search", inputDelta = "{\"q\":\"a\"}"),
+        )
+
+        val tool = messages.tools().single()
+        assertEquals("search", tool.toolName)
+        assertEquals("""{"q":"a"}""", tool.input)
+    }
+
     private fun metadata(value: String): JsonObject = buildJsonObject { put("k", value) }
 
     private fun List<UIMessage>.tools(): List<UIMessagePart.Tool> =

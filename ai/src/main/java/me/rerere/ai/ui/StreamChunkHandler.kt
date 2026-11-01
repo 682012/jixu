@@ -193,7 +193,16 @@ class StreamChunkHandler(private val model: Model? = null) {
                 // 是重复事件：既不新建 part，也不重置工具名，避免后续 Delta 把名字拼两遍。
                 // 这里只看"本步是否已经见过这个 id"，不能用 parts 里有没有同 id 的 part 来判断，
                 // 否则消息里之前步骤留下的、已经执行过的 part 会把本步的调用吞掉。
-                if (chunk.id in toolCallSlots) {
+                //
+                // 但"见过这个 id"不等于"还是同一个调用"：Provider 可能把同一个 id 复用给另一个
+                // 工具（缺 index 的中转尤其常见）。工具名不同就是新调用，必须建新 part，
+                // 否则第二个调用的参数会被拼到第一个 part 上，调用静默丢失。
+                // 任一方名字暂时为空时（Start 不带名字、名字在 Delta 里）无法判断，按重复事件处理。
+                val existingSlot = toolCallSlots[chunk.id]
+                val existingName = existingSlot?.let { slot -> parts.nameOfToolCall(slot.toolCallId) }
+                if (existingSlot != null &&
+                    (existingName.isNullOrBlank() || chunk.toolName.isBlank() || existingName == chunk.toolName)
+                ) {
                     this
                 } else {
                     val toolCallId = allocateToolCallId(chunk.id, parts)
@@ -239,15 +248,21 @@ class StreamChunkHandler(private val model: Model? = null) {
 
             is StreamChunk.ToolCallEnd -> this
             is StreamChunk.ToolCallOutput -> {
-                // 只写本实例分配到的那个 part；不做保底匹配，避免把输出写到之前步骤的调用上。
-                val toolCallId = toolCallSlots[chunk.id]?.toolCallId ?: chunk.id
-                copy(parts = parts.map { part ->
-                    if (part is UIMessagePart.Tool && part.toolCallId == toolCallId) {
-                        part.copy(output = listOf(UIMessagePart.Text(chunk.output)))
-                    } else {
-                        part
-                    }
-                })
+                // 只写本实例分配到的那个 part。没有 slot 说明本实例没见过这个调用的 Start/Delta，
+                // 这个输出不属于本步：直接丢弃。绝不能回退到 `chunk.id`——那样会覆盖之前步骤里
+                // 恰好同 id 的已执行 part 的结果，并让本步的调用永远拿不到 output。
+                val slot = toolCallSlots[chunk.id]
+                if (slot == null) {
+                    this
+                } else {
+                    copy(parts = parts.map { part ->
+                        if (part is UIMessagePart.Tool && part.toolCallId == slot.toolCallId) {
+                            part.copy(output = listOf(UIMessagePart.Text(chunk.output)))
+                        } else {
+                            part
+                        }
+                    })
+                }
             }
             is StreamChunk.ServerToolStart -> {
                 val index = parts.indexOfFirst {
@@ -401,6 +416,16 @@ class StreamChunkHandler(private val model: Model? = null) {
         while ("$base#$suffix" in used) suffix++
         return "$base#$suffix"
     }
+
+    /**
+     * 某个 toolCallId 对应 part 上已经拼好的工具名。
+     *
+     * 用来判断"同一步内同一个事件 id 再来一次 Start"是重复事件还是复用 id 的新调用。名字以
+     * part 上的内容为准（名字常常来自后续 Delta），所以这里读 parts 而不是在 slot 里再存一份。
+     */
+    private fun List<UIMessagePart>.nameOfToolCall(toolCallId: String): String? =
+        (firstOrNull { it is UIMessagePart.Tool && it.toolCallId == toolCallId } as? UIMessagePart.Tool)
+            ?.toolName
 
     /** 一次响应内某个 Provider 工具事件 id 到本地 toolCallId 的映射。 */
     private class ToolCallSlot(val toolCallId: String)

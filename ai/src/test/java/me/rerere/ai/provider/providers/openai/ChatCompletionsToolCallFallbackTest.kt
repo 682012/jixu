@@ -146,8 +146,67 @@ class ChatCompletionsToolCallFallbackTest {
         assertEquals("tool_calls", finish.finishReason)
     }
 
+    // ------------------------------------------------- 缺 index 的 provider（问题 13）
+
+    @Test
+    fun `tool calls without index are kept separate per function name`() {
+        // 每个 chunk 只带一个 tool_call、既没有 index 也没有 id：两条 chunk 的数组下标都是 0，
+        // 只用下标会让两个不同工具拿到同一个合成 id，于是它们塌成一个 part。
+        val chunks = collect(
+            ChatCompletionsStreamDecoder(),
+            toolSse(ToolDelta(index = null, name = "shell", arguments = """{"cmd":"ls"}""")),
+            toolSse(ToolDelta(index = null, name = "read_file", arguments = """{"path":"a.txt"}""")),
+        )
+
+        val starts = chunks.filterIsInstance<StreamChunk.ToolCallStart>()
+        assertEquals("两个不同的工具必须有两个调用", 2, starts.size)
+        assertEquals("缺 index 的不同工具不能用同一个合成 id", 2, starts.map { it.id }.toSet().size)
+        assertEquals(listOf("shell", "read_file"), starts.map { it.toolName })
+    }
+
+    @Test
+    fun `two index less tool calls become two parts and both keep their own input`() {
+        var messages = listOf(UIMessage.user("list files"))
+        val handler = StreamChunkHandler(model)
+        collect(
+            ChatCompletionsStreamDecoder(),
+            toolSse(ToolDelta(index = null, name = "shell", arguments = """{"cmd":"ls"}""")),
+            toolSse(ToolDelta(index = null, name = "read_file", arguments = """{"path":"a.txt"}""")),
+        ).forEach { chunk -> messages = handler.handle(messages, chunk) }
+
+        val tools = messages.last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals("两个调用不能塌成一个 part", 2, tools.size)
+        assertEquals("shell", tools[0].toolName)
+        assertEquals("""{"cmd":"ls"}""", tools[0].input)
+        assertEquals("read_file", tools[1].toolName)
+        assertEquals("""{"path":"a.txt"}""", tools[1].input)
+        assertNotEquals(tools[0].toolCallId, tools[1].toolCallId)
+        assertFalse(tools[0].isExecuted)
+        assertFalse(tools[1].isExecuted)
+    }
+
+    @Test
+    fun `a nameless continuation without index stays in the same call`() {
+        // 入参分两条 chunk 续写、第二条不带名字也不带 index：必须续写在同一个调用上，
+        // 不能被当成"另一个工具"新开一个调用。
+        val chunks = collect(
+            ChatCompletionsStreamDecoder(),
+            toolSse(ToolDelta(index = null, name = "shell", arguments = "{\"cmd\":")),
+            toolSse(ToolDelta(index = null, arguments = "\"ls\"}")),
+        )
+
+        val starts = chunks.filterIsInstance<StreamChunk.ToolCallStart>()
+        assertEquals(1, starts.size)
+        assertEquals("shell", starts.single().toolName)
+        assertEquals(
+            listOf("{\"cmd\":", "\"ls\"}"),
+            chunks.filterIsInstance<StreamChunk.ToolCallDelta>().map { it.inputDelta },
+        )
+    }
+
     private data class ToolDelta(
-        val index: Int,
+        /** `null` 表示这条 tool_call 不带 index（部分中转/本地端点如此）。 */
+        val index: Int?,
         val id: String? = null,
         val name: String? = null,
         val arguments: String? = null,
@@ -167,7 +226,7 @@ class ChatCompletionsToolCallFallbackTest {
                         put("tool_calls", buildJsonArray {
                             toolCalls.forEach { call ->
                                 add(buildJsonObject {
-                                    put("index", call.index)
+                                    call.index?.let { put("index", it) }
                                     call.id?.let { put("id", it) }
                                     put("function", buildJsonObject {
                                         call.name?.let { put("name", it) }
