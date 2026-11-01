@@ -14,6 +14,7 @@ class WorkspaceManager(
     private val bindMounts: List<WorkspaceBindMount> = emptyList(),
 ) {
     private val fileSystem = WorkspaceFileSystem(config)
+    private val search = WorkspaceSearch()
 
     // 按 target 长度降序, 保证 /a/b 优先于 /a 匹配
     private val sortedBindMounts = bindMounts.sortedByDescending { it.target.trimEnd('/').length }
@@ -188,6 +189,79 @@ class WorkspaceManager(
     fun moveFile(root: String, source: String, target: String, overwrite: Boolean = false): WorkspaceFileEntry =
         fileSystem.move(filesDir(root), source, target, overwrite)
 
+    /**
+     * 在 Rootfs 内任意绝对路径上 grep。
+     *
+     * 路径先经 [resolveRootfsPath] 映射到宿主目录 (含 bind mount), 结果再翻回 Rootfs 绝对路径,
+     * 所以模型看到的永远是 `/workspace/...`、`/skills/...` 这种它自己能再读的路径。
+     */
+    fun grepRootfs(
+        root: String,
+        path: String,
+        options: WorkspaceGrepOptions,
+    ): WorkspaceGrepResult {
+        val target = resolveSearchTarget(root, path)
+        val result = search.grep(target.hostBase, options)
+        return result.mapPaths { rootfsDisplayPath(target.displayBase, it) }
+    }
+
+    /** 在 Rootfs 内任意绝对路径上按 glob 找文件, 结果按修改时间新→旧 */
+    fun globRootfs(
+        root: String,
+        path: String,
+        options: WorkspaceGlobOptions,
+    ): WorkspaceGlobResult {
+        val target = resolveSearchTarget(root, path)
+        val result = search.glob(target.hostBase, options)
+        return result.mapPaths { rootfsDisplayPath(target.displayBase, it) }
+    }
+
+    /**
+     * 按行读取 Rootfs 内文件, offset 从 1 起。
+     * 流式读, 不看完整文件大小以外的东西; 大文件按 offset/limit 取一段即可。
+     */
+    fun readRootfsLines(
+        root: String,
+        path: String,
+        offset: Int = 1,
+        limit: Int = WorkspaceLines.DEFAULT_LIMIT,
+    ): WorkspaceLineSlice {
+        val file = resolveRootfsFile(root, path)
+        require(file.exists()) { "File does not exist: $path" }
+        require(file.isFile) { "Path is not a file: $path" }
+        return WorkspaceLines.read(file, offset, limit)
+    }
+
+    private fun resolveSearchTarget(root: String, path: String): RootfsSearchTarget {
+        val rootfsPath = normalizeRootfsPath(path)
+        val location = resolveRootfsPath(root, rootfsPath)
+        // fileSystem.resolve 做规范化与越界校验, 防止 .. 或软链跑出映射根
+        val hostBase = fileSystem.resolve(location.rootDir, location.relativePath)
+        require(hostBase.exists()) { "Path does not exist: $path" }
+        val displayBase = if (hostBase.isFile) parentRootfsPath(rootfsPath) else rootfsPath
+        return RootfsSearchTarget(hostBase, displayBase)
+    }
+
+    private fun normalizeRootfsPath(path: String): String {
+        val trimmed = path.trim().replace('\\', '/').trimEnd('/')
+        require(trimmed.isEmpty() || trimmed.startsWith("/")) {
+            "Rootfs path must be absolute: $path"
+        }
+        return trimmed.ifEmpty { "/" }
+    }
+
+    private fun parentRootfsPath(path: String): String {
+        if (path == "/") return "/"
+        val cut = path.lastIndexOf('/')
+        return if (cut <= 0) "/" else path.substring(0, cut)
+    }
+
+    private fun rootfsDisplayPath(displayBase: String, relative: String): String {
+        val clean = relative.trimStart('/')
+        if (clean.isEmpty()) return displayBase
+        return if (displayBase == "/") "/$clean" else "$displayBase/$clean"
+    }
+
     fun glob(root: String, pattern: String, path: String = ""): List<WorkspaceFileEntry> =
         fileSystem.glob(filesDir(root), pattern, path)
 
@@ -341,4 +415,10 @@ class WorkspaceManager(
 data class RootfsLocation(
     val rootDir: File,
     val relativePath: String,
+)
+
+/** 一次 Rootfs 内搜索的落点: 宿主目录 + 结果要拼回的 Rootfs 路径前缀 */
+private data class RootfsSearchTarget(
+    val hostBase: File,
+    val displayBase: String,
 )

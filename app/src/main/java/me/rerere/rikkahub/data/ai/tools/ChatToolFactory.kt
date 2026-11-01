@@ -29,6 +29,10 @@ import java.io.File
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatToolFactory"
+
+/** 自己分页、自己控制输出量的工具: 不再经 ToolOutputStore 外置成文件 */
+internal val SELF_PAGED_TOOL_NAMES: Set<String> = setOf("workspace_read_file", "workspace_grep", "workspace_glob")
+
 internal fun shouldUseExternalWebSearch(assistant: Assistant, model: Model): Boolean {
     return assistant.enableWebSearch && BuiltInTools.Search !in model.tools
 }
@@ -194,7 +198,10 @@ class ChatToolFactory(
     private fun prepareEfficientTools(tools: List<Tool>, outputStore: ToolOutputStore): List<Tool> {
         val compact = compactMcpTools(tools)
         val readerName = uniqueToolName(TOOL_OUTPUT_READ_TOOL_NAME, compact.map { it.name }.toSet())
-        val readable = compact.map(outputStore::wrap) + outputStore.createReaderTool(readerName)
+        // 工作区读/搜工具自己分页并控制了输出量, 外置只会让模型多花一轮去读回全文 (同 ToolOutputStore 里 search_web 的豁免)
+        val readable = compact.map { tool ->
+            if (tool.name in SELF_PAGED_TOOL_NAMES) tool else outputStore.wrap(tool)
+        } + outputStore.createReaderTool(readerName)
         // A single structured call can execute an already planned set without extra model round trips.
         return (readable + outputStore.wrap(createToolBatch(readable))).sortedBy { it.name }
     }

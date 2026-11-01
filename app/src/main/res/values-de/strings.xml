@@ -1141,6 +1141,8 @@
   <string name="workspace_detail_tool_read_file">Datei lesen</string>
   <string name="workspace_detail_tool_write_file">Datei schreiben</string>
   <string name="workspace_detail_tool_edit_file">Datei bearbeiten</string>
+  <string name="workspace_detail_tool_glob">Dateien finden</string>
+  <string name="workspace_detail_tool_grep">Inhalt durchsuchen</string>
   <string name="workspace_detail_tool_delete_file">Datei löschen</string>
   <string name="workspace_detail_tool_move_file">Datei verschieben</string>
   <string name="workspace_detail_tool_shell">Befehl ausführen</string>
@@ -1213,6 +1215,10 @@
   <string name="tool_ui_edit_file_default">Datei bearbeiten</string>
   <string name="tool_ui_read_file">Lesen: %s</string>
   <string name="tool_ui_read_file_default">Datei lesen</string>
+  <string name="tool_ui_grep">Suche: %s</string>
+  <string name="tool_ui_grep_default">Suchen</string>
+  <string name="tool_ui_glob">Finden: %s</string>
+  <string name="tool_ui_glob_default">Dateien finden</string>
   <string name="tool_ui_write_file">Schreiben: %s</string>
   <string name="tool_ui_write_file_default">Datei schreiben</string>
   <string name="tool_ui_list_files">Auflisten: %s</string>

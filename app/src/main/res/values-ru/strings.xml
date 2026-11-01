@@ -1134,6 +1134,8 @@
   <string name="workspace_detail_tool_read_file">Читать файл</string>
   <string name="workspace_detail_tool_write_file">Записать файл</string>
   <string name="workspace_detail_tool_edit_file">Редактировать файл</string>
+  <string name="workspace_detail_tool_glob">Найти файлы</string>
+  <string name="workspace_detail_tool_grep">Поиск по содержимому</string>
   <string name="workspace_detail_tool_delete_file">Удалить файл</string>
   <string name="workspace_detail_tool_move_file">Переместить файл</string>
   <string name="workspace_detail_tool_shell">Выполнить команду</string>
@@ -1178,6 +1180,10 @@
   <string name="tool_ui_edit_file_default">Редактировать файл</string>
   <string name="tool_ui_read_file">Чтение: %s</string>
   <string name="tool_ui_read_file_default">Читать файл</string>
+  <string name="tool_ui_grep">Поиск: %s</string>
+  <string name="tool_ui_grep_default">Поиск</string>
+  <string name="tool_ui_glob">Найти: %s</string>
+  <string name="tool_ui_glob_default">Найти файлы</string>
   <string name="tool_ui_write_file">Записать: %s</string>
   <string name="tool_ui_write_file_default">Записать файл</string>
   <string name="tool_ui_list_files">Список: %s</string>

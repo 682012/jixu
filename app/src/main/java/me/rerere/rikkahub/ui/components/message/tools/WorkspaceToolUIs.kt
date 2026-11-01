@@ -27,6 +27,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.ui.DiffMetadata
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.rikkahub.ui.components.richtext.CodeHighlightText
@@ -36,6 +37,8 @@ import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.FileAdd
 import me.rerere.hugeicons.stroke.FileEdit
 import me.rerere.hugeicons.stroke.FileView
+import me.rerere.hugeicons.stroke.FolderOpen
+import me.rerere.hugeicons.stroke.Search01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.modifier.shimmer
@@ -165,9 +168,9 @@ object ReadFileToolUI : ToolUIRenderer {
         return if (path != null) stringResource(R.string.tool_ui_read_file, path) else stringResource(R.string.tool_ui_read_file_default)
     }
 
-    /** 已执行时从输出 JSON 读取文件内容 */
+    /** 已执行时从输出 JSON 读取文件内容; 行号前缀只是给模型看的, 预览里去掉 */
     private fun textOf(context: ToolUIContext): String? =
-        context.content.getStringContent("text")
+        context.content.getStringContent("text")?.withoutLineNumbers()
 
     override fun hasSummary(context: ToolUIContext): Boolean = textOf(context) != null
 
@@ -278,6 +281,154 @@ private fun FileContentPreview(path: String?, code: String) {
         HighlightCodeBlock(
             code = code,
             language = languageOf(path),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * 工作空间搜索内容: 摘要显示结果首部, 详情显示 pattern/path 与完整文本输出
+ */
+object GrepToolUI : ToolUIRenderer {
+    override val toolName: String = "workspace_grep"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.Search01
+
+    @Composable
+    override fun title(context: ToolUIContext): String {
+        val pattern = context.arguments.getStringContent("pattern")
+        return if (pattern != null) {
+            stringResource(R.string.tool_ui_grep, pattern)
+        } else {
+            stringResource(R.string.tool_ui_grep_default)
+        }
+    }
+
+    override fun hasSummary(context: ToolUIContext): Boolean = context.rawOutputText().isNotBlank()
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        val text = context.rawOutputText()
+        if (text.isBlank()) return
+        SearchResultSummary(text = text, loading = context.loading)
+    }
+
+    @Composable
+    override fun Preview(context: ToolUIContext, onDismissRequest: () -> Unit) {
+        val text = context.rawOutputText()
+        if (text.isBlank()) {
+            DefaultToolPreview(context = context)
+            return
+        }
+        SearchResultPreview(
+            title = context.arguments.getStringContent("pattern") ?: stringResource(R.string.tool_ui_grep_default),
+            subtitle = context.arguments.getStringContent("path"),
+            text = text,
+        )
+    }
+}
+
+/**
+ * 工作空间按 glob 找文件: 摘要显示结果首部, 详情显示 pattern/path 与完整文本输出
+ */
+object GlobToolUI : ToolUIRenderer {
+    override val toolName: String = "workspace_glob"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.FolderOpen
+
+    @Composable
+    override fun title(context: ToolUIContext): String {
+        val pattern = context.arguments.getStringContent("pattern")
+        return if (pattern != null) {
+            stringResource(R.string.tool_ui_glob, pattern)
+        } else {
+            stringResource(R.string.tool_ui_glob_default)
+        }
+    }
+
+    override fun hasSummary(context: ToolUIContext): Boolean = context.rawOutputText().isNotBlank()
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        val text = context.rawOutputText()
+        if (text.isBlank()) return
+        SearchResultSummary(text = text, loading = context.loading)
+    }
+
+    @Composable
+    override fun Preview(context: ToolUIContext, onDismissRequest: () -> Unit) {
+        val text = context.rawOutputText()
+        if (text.isBlank()) {
+            DefaultToolPreview(context = context)
+            return
+        }
+        SearchResultPreview(
+            title = context.arguments.getStringContent("pattern") ?: stringResource(R.string.tool_ui_glob_default),
+            subtitle = context.arguments.getStringContent("path"),
+            text = text,
+        )
+    }
+}
+
+/** 搜索类工具的输出是纯文本而不是 JSON, 直接取回原文 */
+private fun ToolUIContext.rawOutputText(): String =
+    tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+
+/** 内联摘要: 搜索结果的头部若干行 */
+@Composable
+private fun SearchResultSummary(text: String, loading: Boolean) {
+    val preview = remember(text) {
+        text.lineSequence().take(FILE_SUMMARY_MAX_LINES).joinToString("\n")
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .shimmer(isLoading = loading),
+    ) {
+        Text(
+            text = preview,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            maxLines = FILE_SUMMARY_MAX_LINES,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** BottomSheet 详情: pattern + 搜索路径 + 完整输出 */
+@Composable
+private fun SearchResultPreview(title: String, subtitle: String?, text: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxHeight(0.8f)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        HighlightCodeBlock(
+            code = text,
+            language = "plaintext",
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -434,6 +585,26 @@ private fun JsonElement?.long(key: String): Long? =
     this?.jsonObjectOrNull?.get(key)?.jsonPrimitiveOrNull?.longOrNull
 
 private const val FILE_SUMMARY_MAX_LINES = 10
+
+/** 输出行号前缀: `%6d\t` (workspace_read_file 的 text 字段) */
+private val NUMBERED_LINE_PREFIX = Regex("^ *\\d{1,9}\\t")
+
+/**
+ * 去掉行号前缀。只在"每一行都带行号"时动手, 兼容没有行号的旧消息与普通文本。
+ */
+private fun String.withoutLineNumbers(): String {
+    if (!contains('\t')) return this
+    val lines = split('\n')
+    var numbered = 0
+    var nonBlank = 0
+    for (line in lines) {
+        if (line.isBlank()) continue
+        nonBlank++
+        if (NUMBERED_LINE_PREFIX.containsMatchIn(line)) numbered++
+    }
+    if (numbered == 0 || numbered != nonBlank) return this
+    return lines.joinToString("\n") { NUMBERED_LINE_PREFIX.replace(it, "") }
+}
 
 /** 由文件扩展名推断语法高亮语言 */
 private fun languageOf(path: String?): String = when (

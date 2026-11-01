@@ -1193,6 +1193,8 @@
   <string name="workspace_detail_tool_read_file">Read File</string>
   <string name="workspace_detail_tool_write_file">Write File</string>
   <string name="workspace_detail_tool_edit_file">Edit File</string>
+  <string name="workspace_detail_tool_glob">Find Files</string>
+  <string name="workspace_detail_tool_grep">Search Contents</string>
   <string name="workspace_detail_tool_delete_file">Delete File</string>
   <string name="workspace_detail_tool_move_file">Move File</string>
   <string name="workspace_detail_tool_shell">Execute Command</string>
@@ -1245,6 +1247,10 @@
   <string name="tool_ui_edit_file_default">Edit file</string>
   <string name="tool_ui_read_file">Read: %s</string>
   <string name="tool_ui_read_file_default">Read file</string>
+  <string name="tool_ui_grep">Search: %s</string>
+  <string name="tool_ui_grep_default">Search</string>
+  <string name="tool_ui_glob">Find: %s</string>
+  <string name="tool_ui_glob_default">Find files</string>
   <string name="tool_ui_write_file">Write: %s</string>
   <string name="tool_ui_write_file_default">Write file</string>
   <string name="tool_ui_list_files">List: %s</string>

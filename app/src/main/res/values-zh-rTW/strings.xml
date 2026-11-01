@@ -1132,6 +1132,8 @@
   <string name="workspace_detail_tool_read_file">讀取檔案</string>
   <string name="workspace_detail_tool_write_file">寫入檔案</string>
   <string name="workspace_detail_tool_edit_file">編輯檔案</string>
+  <string name="workspace_detail_tool_glob">尋找檔案</string>
+  <string name="workspace_detail_tool_grep">搜尋內容</string>
   <string name="workspace_detail_tool_delete_file">刪除檔案</string>
   <string name="workspace_detail_tool_move_file">移動檔案</string>
   <string name="workspace_detail_tool_shell">執行命令</string>
@@ -1176,6 +1178,10 @@
   <string name="tool_ui_edit_file_default">編輯檔案</string>
   <string name="tool_ui_read_file">讀取: %s</string>
   <string name="tool_ui_read_file_default">讀取檔案</string>
+  <string name="tool_ui_grep">搜尋：%s</string>
+  <string name="tool_ui_grep_default">搜尋</string>
+  <string name="tool_ui_glob">尋找：%s</string>
+  <string name="tool_ui_glob_default">尋找檔案</string>
   <string name="tool_ui_write_file">寫入: %s</string>
   <string name="tool_ui_write_file_default">寫入檔案</string>
   <string name="tool_ui_list_files">列表：%s</string>

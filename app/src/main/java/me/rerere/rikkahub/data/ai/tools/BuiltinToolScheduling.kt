@@ -6,7 +6,8 @@ import me.rerere.ai.core.ToolExecutionMode
 // Never classify MCP tools by their apparent name: names do not establish side-effect semantics.
 private val independentReads = setOf(
     "memory_read", "memory_list", "search_web", "recent_chats", "conversation_search", "conversation_read",
-    "workspace_read_file", "use_skill", "eval_javascript", "get_current_time", "get_time_info",
+    "workspace_read_file", "workspace_grep", "workspace_glob", "use_skill", "eval_javascript",
+    "get_current_time", "get_time_info",
     "calendar_query", "get_screen_time",
 )
 private val concurrentWithoutCoalescing = setOf(

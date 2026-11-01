@@ -28,10 +28,15 @@ import me.rerere.workspace.WorkspaceBackend
 import me.rerere.workspace.WorkspaceBackgroundCommand
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceFileEntry
+import me.rerere.workspace.WorkspaceGlobOptions
+import me.rerere.workspace.WorkspaceGlobResult
+import me.rerere.workspace.WorkspaceGrepOptions
+import me.rerere.workspace.WorkspaceGrepResult
 import me.rerere.workspace.WorkspaceJobInfo
 import me.rerere.workspace.WorkspaceJobManager
 import me.rerere.workspace.WorkspaceJobStatus
 import me.rerere.workspace.WorkspaceLayout
+import me.rerere.workspace.WorkspaceLineSlice
 import me.rerere.workspace.WorkspaceManager
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
@@ -355,6 +360,47 @@ class WorkspaceRepository(
         path: String,
         outputStream: OutputStream,
     ) = readFromBackend(id) { it.exportAbsoluteFile(path, outputStream) }
+
+    /**
+     * 在 Rootfs 内任意绝对路径上搜索文本。
+     *
+     * LOCAL_ROOTFS 与 HTTP 远程执行都走 workspace 模块的本地实现: HTTP 远程只是命令在服务器上跑,
+     * 工作区文件仍在本机。SSH 工作区的文件在对端, 这一版不提供搜索, 用 workspace_shell。
+     */
+    suspend fun grepInRootfs(
+        id: String,
+        path: String,
+        options: WorkspaceGrepOptions,
+    ): WorkspaceGrepResult {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        require(!workspace.isSsh()) { SSH_ROOTFS_SEARCH_UNSUPPORTED_MESSAGE }
+        return runInterruptible(Dispatchers.IO) { manager.grepRootfs(workspace.root, path, options) }
+    }
+
+    /** 在 Rootfs 内任意绝对路径上按 glob 找文件, 后端限制同上 */
+    suspend fun globInRootfs(
+        id: String,
+        path: String,
+        options: WorkspaceGlobOptions,
+    ): WorkspaceGlobResult {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        require(!workspace.isSsh()) { SSH_ROOTFS_SEARCH_UNSUPPORTED_MESSAGE }
+        return runInterruptible(Dispatchers.IO) { manager.globRootfs(workspace.root, path, options) }
+    }
+
+    /** 按行读取 Rootfs 内文件, offset 从 1 起; 流式读, 不受整文件大小限制之外的额外约束 */
+    suspend fun readLinesInRootfs(
+        id: String,
+        path: String,
+        offset: Int,
+        limit: Int,
+    ): WorkspaceLineSlice {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        require(!workspace.isSsh()) { SSH_ROOTFS_SEARCH_UNSUPPORTED_MESSAGE }
+        return runInterruptible(Dispatchers.IO) {
+            manager.readRootfsLines(workspace.root, path, offset, limit)
+        }
+    }
 
     /**
      * 把工作区的 /workspace 目录打成 zip，跳过可重建的大目录。
@@ -741,6 +787,10 @@ class WorkspaceRepository(
     companion object {
         private const val TAG = "WorkspaceRepository"
         private const val MAX_PREVIEW_BYTES = 512L * 1024
+
+        /** SSH 工作区的文件在对端, 本地搜索没有意义 */
+        internal const val SSH_ROOTFS_SEARCH_UNSUPPORTED_MESSAGE =
+            "Searching is not supported for SSH workspaces; use workspace_shell (grep/find) instead"
     }
 }
 

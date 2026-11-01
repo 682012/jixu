@@ -1262,6 +1262,10 @@
   <string name="tool_ui_move_file">نقل ملف</string>
   <string name="tool_ui_read_file">قراءة: %s</string>
   <string name="tool_ui_read_file_default">قراءة ملف</string>
+  <string name="tool_ui_grep">بحث: %s</string>
+  <string name="tool_ui_grep_default">بحث</string>
+  <string name="tool_ui_glob">إيجاد: %s</string>
+  <string name="tool_ui_glob_default">إيجاد ملفات</string>
   <string name="tool_ui_replay">إعادة التشغيل</string>
   <string name="tool_ui_screen_time_total">إجمالي وقت الشاشة</string>
   <string name="tool_ui_shell">Shell: %s</string>
@@ -1333,6 +1337,8 @@
   <string name="workspace_detail_tool_approval_desc">عند التفعيل، يلزم تأكيد المستخدم قبل أن يستدعي الذكاء الاصطناعي هذه الأداة</string>
   <string name="workspace_detail_tool_delete_file">حذف ملف</string>
   <string name="workspace_detail_tool_edit_file">تعديل الملف</string>
+  <string name="workspace_detail_tool_glob">البحث عن ملفات</string>
+  <string name="workspace_detail_tool_grep">بحث في المحتوى</string>
   <string name="workspace_detail_tool_list_files">عرض الملفات</string>
   <string name="workspace_detail_tool_move_file">نقل ملف</string>
   <string name="workspace_detail_tool_read_file">قراءة الملف</string>
