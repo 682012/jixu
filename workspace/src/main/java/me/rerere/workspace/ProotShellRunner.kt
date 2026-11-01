@@ -1,6 +1,8 @@
 package me.rerere.workspace
 
+import android.system.Os
 import java.io.File
+import java.util.UUID
 
 data class WorkspaceBindMount(
     val source: File,
@@ -12,6 +14,16 @@ data class WorkspaceBindMount(
         require(target.startsWith("/")) { "Bind mount target must be absolute: $target" }
     }
 }
+
+// 命令通过位置参数传入, 避免任何转义; eval "$2" 对命令文本只求值一次, 等价于 bash -c "$cmd"
+internal const val PROOT_EXEC_SCRIPT = "cd -- \"\$1\" && eval \"\$2\""
+
+/**
+ * 后台命令与任务用的脚本: 收到 SIGTERM 后不再执行剩余命令, 等已派生的进程收尾后以 143 退出。
+ * trap 推迟到当前前台命令结束才执行, 所以终止时 SIGTERM 要连同命令派生的进程一起发, 见 [ProotProcess.destroy]。
+ * 宽限期内仍未退出的进程由调用方 [ProotProcess.destroyForcibly] 结束
+ */
+internal const val PROOT_TERMINABLE_SCRIPT = "trap 'trap - TERM; wait; exit 143' TERM; $PROOT_EXEC_SCRIPT"
 
 class ProotShellRunner(
     private val nativeLibraryDir: File,
@@ -25,9 +37,7 @@ class ProotShellRunner(
                 stderr = reason,
             )
         }
-        val process = processBuilder(context, buildCommand(context, EXEC_SCRIPT))
-            .redirectErrorStream(false)
-            .start()
+        val process = startProot(context, PROOT_EXEC_SCRIPT) { redirectErrorStream(false) }
         return process.readResult(context.timeoutMillis, context.stdin)
     }
 
@@ -36,23 +46,42 @@ class ProotShellRunner(
         // 日志放在 Rootfs 的 /tmp 下, 模型可以用 shell 直接 tail/grep; 应用启动时随 /tmp 一起清理
         val dir = File(context.linuxDir, BACKGROUND_DIR.trimStart('/')).apply { mkdirs() }
         val logFile = File(dir, "$id.log")
-        val pidFile = File(dir, "$id.pid")
-        val process = processBuilder(context, buildCommand(context, BACKGROUND_SCRIPT, "$BACKGROUND_DIR/$id.pid"))
-            .redirectErrorStream(true)
-            .redirectOutput(logFile)
-            .redirectInput(File("/dev/null"))
-            .start()
-        return ProotBackgroundCommand(process, logFile, "$BACKGROUND_DIR/$id.log", pidFile)
+        val process = startProot(context, PROOT_TERMINABLE_SCRIPT) {
+            redirectErrorStream(true)
+            redirectOutput(logFile)
+            redirectInput(File("/dev/null"))
+        }
+        return ProotBackgroundCommand(process, logFile, "$BACKGROUND_DIR/$id.log")
     }
 
     // fork: workspace_job 的持久进程，tracer 由调用方 (WorkspaceJobManager) 持有
     override fun start(context: WorkspaceShellContext, logFile: File): Process {
         unavailableReason(context)?.let { reason -> throw IllegalArgumentException(reason) }
-        return processBuilder(context, buildCommand(context, EXEC_SCRIPT))
-            .redirectInput(File("/dev/null"))
-            .redirectOutput(logFile)
-            .redirectErrorStream(true)
+        return startProot(context, PROOT_TERMINABLE_SCRIPT) {
+            redirectInput(File("/dev/null"))
+            redirectOutput(logFile)
+            redirectErrorStream(true)
+        }
+    }
+
+    /**
+     * 启动 PRoot 并包装成 [ProotProcess]: 环境变量里带一个随机标记, 终止时据此找到 PRoot 与它跟踪的进程,
+     * 见 [ProotProcessTree]。标记不会进入 Rootfs, 命令经 `env -i` 只拿到 [ROOTFS_ENV]
+     */
+    private fun startProot(
+        context: WorkspaceShellContext,
+        script: String,
+        configure: ProcessBuilder.() -> Unit,
+    ): Process {
+        val runId = UUID.randomUUID().toString()
+        val process = processBuilder(context, buildCommand(context, script))
+            .apply {
+                environment()[ProotProcessTree.MARKER_ENV] = runId
+                configure()
+            }
             .start()
+        val tree = ProotProcessTree(ProotProcessTree.markerEntry(runId), parentPid = Os.getpid())
+        return ProotProcess(process, tree)
     }
 
     private fun unavailableReason(context: WorkspaceShellContext): String? = when {
@@ -111,7 +140,6 @@ class ProotShellRunner(
     private fun buildCommand(
         context: WorkspaceShellContext,
         script: String,
-        vararg extraArgs: String,
     ): List<String> {
         val command = mutableListOf(File(nativeLibraryDir, PROOT_EXEC).absolutePath)
         command += prootArgs(context.linuxDir, context.filesDir, context.prootCwd(), context.bindMounts)
@@ -129,7 +157,6 @@ class ProotShellRunner(
             context.prootCwd(),
             context.command,
         )
-        command += extraArgs
         return command
     }
 
@@ -182,13 +209,7 @@ class ProotShellRunner(
         private const val PROOT_LOADER = "libproot_loader.so"
         private val WORKSPACE_DIR = WorkspaceManager.ROOTFS_WORKSPACE_DIR
 
-        // 命令通过位置参数传入, 避免任何转义; eval "$2" 对命令文本只求值一次, 等价于 bash -c "$cmd"
-        private const val EXEC_SCRIPT = "cd -- \"\$1\" && eval \"\$2\""
-
-        // 后台命令先把 shell 与 PRoot 的进程号写入 $3, 终止时据此给整组进程发信号, 见 ProotBackgroundCommand
-        private const val BACKGROUND_SCRIPT = "echo \"\$\$ \$PPID\" > \"\$3\"; $EXEC_SCRIPT"
-
-        /** Rootfs 内存放后台命令日志与进程号的目录 */
+        /** Rootfs 内存放后台命令日志的目录 */
         private const val BACKGROUND_DIR = "/tmp/rikkahub/background"
 
         /** 清空宿主机环境变量后 Rootfs 内的基础环境 */
