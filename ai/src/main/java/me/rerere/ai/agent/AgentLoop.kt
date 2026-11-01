@@ -99,10 +99,12 @@ internal class AgentLoop(
             parts = emptyList(),
             modelId = params.model.id,
         )
+        // 发给模型的副本里折叠重复的工具结果，消息本身保留完整内容
+        val messages = dedupeRepeatedToolOutputs(step.messages) { findTool(it)?.repeatable == true }
         val generated = if (request.stream) {
-            stream(step.messages, params, base)
+            stream(messages, params, base)
         } else {
-            generate(step.messages, params, base)
+            generate(messages, params, base)
         }
         update(hooks.finishStep(generated, newPartsFrom = base.parts.size).copy(finishedAt = now()))
     }
@@ -178,23 +180,35 @@ internal class AgentLoop(
     // Adjacent, explicitly independent calls overlap. Every serial call is a full ordering barrier.
     // Only the collector coroutine updates the message/emits events; workers report through a channel.
     private suspend fun executeTools() {
-        val pending = checkNotNull(message).getTools().filter { !it.isExecuted }
+        val tools = checkNotNull(message).getTools()
+        val pending = tools.filter { !it.isExecuted }
+        // 连续多次结果相同的调用不再执行，见 ToolRepetition.kt
+        val blocked = blockedRepeatCalls(tools.filter { it.isExecuted }, pending) { findTool(it)?.repeatable == true }
         var index = 0
         while (index < pending.size) {
             val first = pending[index]
-            if (!canRunInParallel(first)) {
+            if (first.toolCallId in blocked && first.runs()) {
+                updateTool(first.toolCallId) { it.copy(output = repeatBlockedOutput()) }
+                index++
+                continue
+            }
+            if (!canRunInParallel(first, blocked)) {
                 executeOne(first)
                 index++
                 continue
             }
             val from = index
-            while (index < pending.size && canRunInParallel(pending[index])) index++
+            while (index < pending.size && canRunInParallel(pending[index], blocked)) index++
             executeParallel(pending.subList(from, index))
         }
     }
 
-    private fun canRunInParallel(tool: UIMessagePart.Tool): Boolean =
-        (tool.approvalState == ToolApprovalState.Auto || tool.approvalState == ToolApprovalState.Approved) &&
+    private fun UIMessagePart.Tool.runs() =
+        approvalState == ToolApprovalState.Auto || approvalState == ToolApprovalState.Approved
+
+    private fun canRunInParallel(tool: UIMessagePart.Tool, blocked: Set<String>): Boolean =
+        tool.toolCallId !in blocked &&
+            (tool.approvalState == ToolApprovalState.Auto || tool.approvalState == ToolApprovalState.Approved) &&
             findTool(tool.toolName)?.executionMode?.allowsParallelExecution() == true &&
             !(tool.startedAt != null && findTool(tool.toolName)?.executionMode != ToolExecutionMode.PARALLEL_DEDUPLICATED)
 

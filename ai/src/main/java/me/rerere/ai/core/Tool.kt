@@ -27,6 +27,8 @@ data class Tool(
     val needsApproval: (JsonElement) -> Boolean = { false },
     // Local scheduling metadata; never inferred from a tool name or exported as provider schema.
     val executionMode: ToolExecutionMode = ToolExecutionMode.SERIAL,
+    // 轮询类工具（等待、查状态）重复调用且结果相同是正常的：不折叠重复输出，也不按重复调用拦截
+    val repeatable: Boolean = false,
     val execute: suspend (JsonElement) -> List<UIMessagePart>
 )
 

@@ -13,9 +13,19 @@ private val concurrentWithoutCoalescing = setOf(
     "workspace_job_status", "subagent_run", "subagent_wait", "subagent_list",
 )
 
-internal fun withBuiltinExecutionMode(tool: Tool): Tool = when {
-    tool.name.startsWith(MCP_TOOL_NAME_PREFIX) -> tool
-    tool.name in independentReads -> tool.copy(executionMode = ToolExecutionMode.PARALLEL_DEDUPLICATED)
-    tool.name in concurrentWithoutCoalescing -> tool.copy(executionMode = ToolExecutionMode.PARALLEL)
-    else -> tool
+// 轮询类工具：同样的参数反复调用、结果相同是正常的，不折叠输出也不按重复调用拦截（见 ai 模块 ToolRepetition.kt）
+private val pollingTools = setOf(
+    "workspace_job_status", "workspace_shell_output", "subagent_wait", "subagent_list", "get_current_time", "get_time_info",
+)
+
+internal fun withBuiltinExecutionMode(tool: Tool): Tool {
+    if (tool.name.startsWith(MCP_TOOL_NAME_PREFIX)) return tool
+    val mode = when (tool.name) {
+        in independentReads -> ToolExecutionMode.PARALLEL_DEDUPLICATED
+        in concurrentWithoutCoalescing -> ToolExecutionMode.PARALLEL
+        else -> tool.executionMode
+    }
+    val repeatable = tool.repeatable || tool.name in pollingTools
+    return if (mode == tool.executionMode && repeatable == tool.repeatable) tool
+    else tool.copy(executionMode = mode, repeatable = repeatable)
 }
