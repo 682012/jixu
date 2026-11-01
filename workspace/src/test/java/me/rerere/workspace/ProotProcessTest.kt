@@ -137,7 +137,9 @@ class ProotProcessTest {
         val shell = startScript(dir, "sleep 30; touch after")
         try {
             val shellPid = awaitPid(File(dir, "shell.pid"))
-            terminate(awaitDescendants(shellPid, count = 1) + shellPid)
+            val pids = awaitSleeps(shellPid, sleeps = 1)
+            assumeSigtermDeliverable(pids)
+            terminate(pids + shellPid)
             assertTrue(shell.waitFor(10, TimeUnit.SECONDS))
             assertEquals(143, shell.exitValue())
             assertFalse(File(dir, "after").exists())
@@ -155,7 +157,9 @@ class ProotProcessTest {
         )
         try {
             val shellPid = awaitPid(File(dir, "shell.pid"))
-            terminate(awaitDescendants(shellPid, count = 3) + shellPid)
+            val pids = awaitSleeps(shellPid, sleeps = 2)
+            assumeSigtermDeliverable(pids)
+            terminate(pids + shellPid)
             assertTrue(shell.waitFor(10, TimeUnit.SECONDS))
             assertEquals(143, shell.exitValue())
             assertTrue(File(dir, "cleaned").isFile)
@@ -167,7 +171,6 @@ class ProotProcessTest {
 
     private fun startScript(dir: File, command: String): Process {
         assumeTrue(File("/proc/self/status").isFile && File("/bin/bash").canExecute())
-        assumeTrue("SIGTERM is blocked or ignored in the test process", sigtermDeliverable())
         return ProcessBuilder(
             "/bin/bash", "-c", PROOT_TERMINABLE_SCRIPT, "rikkahub", dir.absolutePath,
             "echo \$\$ > shell.pid; $command",
@@ -177,12 +180,18 @@ class ProotProcessTest {
             .start()
     }
 
-    /** 子进程继承屏蔽或忽略 SIGTERM 时 trap 不会触发, 这种环境下跳过 */
-    private fun sigtermDeliverable(): Boolean {
-        val status = (File("/proc/thread-self/status").takeIf { it.isFile } ?: File("/proc/self/status")).readLines()
-        fun mask(name: String) = status.firstOrNull { it.startsWith("$name:") }
-            ?.substringAfter(':')?.trim()?.toLongOrNull(16) ?: 0L
-        return (mask("SigBlk") or mask("SigIgn")) and SIGTERM_BIT == 0L
+    /**
+     * 继承了屏蔽或忽略 SIGTERM 的环境里 trap 不会触发, 这种环境下跳过。
+     * 读已 exec 的 sleep: 它的信号状态继承自 shell 启动时, 不受 shell 运行中临时屏蔽的影响
+     */
+    private fun assumeSigtermDeliverable(pids: List<Int>) {
+        for (pid in pids) {
+            val status = runCatching { File("/proc/$pid/status").readLines() }.getOrNull() ?: continue
+            fun field(name: String) = status.firstOrNull { it.startsWith("$name:") }?.substringAfter(':')?.trim()
+            if (field("Name") != "sleep") continue
+            val masked = (field("SigBlk")?.toLongOrNull(16) ?: 0L) or (field("SigIgn")?.toLongOrNull(16) ?: 0L)
+            assumeTrue("SIGTERM is blocked or ignored", masked and SIGTERM_BIT == 0L)
+        }
     }
 
     private fun awaitPid(file: File): Int {
@@ -194,33 +203,37 @@ class ProotProcessTest {
         error("shell did not start")
     }
 
-    /** 读真实 /proc 找出 [pid] 的所有后代进程 */
-    private fun descendants(pid: Int): List<Int> {
-        val parents = File("/proc").listFiles().orEmpty().mapNotNull { dir ->
+    /** 读真实 /proc 找出 [pid] 的所有后代进程, 值为进程名 */
+    private fun descendants(pid: Int): Map<Int, String> {
+        val procs = File("/proc").listFiles().orEmpty().mapNotNull { dir ->
             val child = dir.name.toIntOrNull() ?: return@mapNotNull null
-            val ppid = runCatching {
-                File(dir, "status").useLines { lines ->
-                    lines.first { it.startsWith("PPid:") }.substringAfter(':').trim().toInt()
-                }
-            }.getOrNull() ?: return@mapNotNull null
-            child to ppid
+            val status = runCatching { File(dir, "status").readLines() }.getOrNull() ?: return@mapNotNull null
+            fun field(name: String) = status.firstOrNull { it.startsWith("$name:") }?.substringAfter(':')?.trim()
+            val ppid = field("PPid")?.toIntOrNull() ?: return@mapNotNull null
+            Triple(child, ppid, field("Name").orEmpty())
         }
-        val result = mutableListOf<Int>()
-        var frontier = listOf(pid)
+        val result = mutableMapOf<Int, String>()
+        var frontier = setOf(pid)
         while (frontier.isNotEmpty()) {
-            frontier = parents.filter { it.second in frontier }.map { it.first }
-            result += frontier
+            val next = procs.filter { it.second in frontier && it.first !in result }
+            next.forEach { result[it.first] = it.third }
+            frontier = next.map { it.first }.toSet()
         }
         return result
     }
 
-    private fun awaitDescendants(pid: Int, count: Int): List<Int> {
+    /**
+     * 等到 [pid] 派生的 [sleeps] 个 sleep 都已 exec, 返回此时的所有后代。
+     * fork 之后、exec 之前收到的 SIGTERM 会被继承来的 trap 吞掉, 正式代码靠宽限期后的 SIGKILL 兜底, 测试里要避开
+     */
+    private fun awaitSleeps(pid: Int, sleeps: Int): List<Int> {
         val deadline = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < deadline) {
-            descendants(pid).takeIf { it.size >= count }?.let { return it }
+            val all = descendants(pid)
+            if (all.values.count { it == "sleep" } >= sleeps) return all.keys.toList()
             Thread.sleep(20)
         }
-        error("expected $count descendants of $pid")
+        error("expected $sleeps sleep processes under $pid")
     }
 
     private fun terminate(pids: List<Int>) {

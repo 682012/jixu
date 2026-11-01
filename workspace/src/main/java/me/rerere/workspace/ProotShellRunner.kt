@@ -75,10 +75,8 @@ class ProotShellRunner(
     ): Process {
         val runId = UUID.randomUUID().toString()
         val process = processBuilder(context, buildCommand(context, script))
-            .apply {
-                environment()[ProotProcessTree.MARKER_ENV] = runId
-                configure()
-            }
+            .apply { environment()[ProotProcessTree.MARKER_ENV] = runId }
+            .apply(configure)
             .start()
         val tree = ProotProcessTree(ProotProcessTree.markerEntry(runId), parentPid = Os.getpid())
         return ProotProcess(process, tree)
