@@ -249,7 +249,7 @@ class StreamChunkHandlerToolCallIdTest {
         val handler = StreamChunkHandler(model)
 
         messages = handler.handle(messages, StreamChunk.ToolCallStart("call_1", "search"))
-        messages = handler.handle(messages, StreamChunk.ToolCallDelta("call_1", inputDelta = """{"q":"a"""))
+        messages = handler.handle(messages, StreamChunk.ToolCallDelta("call_1", inputDelta = "{\"q\":\"a\""))
         messages = handler.handle(messages, StreamChunk.ToolCallEnd("call_1"))
         messages = handler.handle(messages, StreamChunk.ToolCallStart("call_1", "search"))
         messages = handler.handle(messages, StreamChunk.ToolCallDelta("call_1", inputDelta = """}"""))
