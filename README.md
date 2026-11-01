@@ -2,21 +2,21 @@
 
 基于 [RikkaHub 官方 3.1.1](https://github.com/rikkahub/rikkahub/tree/3.1.1) 的非官方分支。保留官方聊天客户端，重点补上**多代理协作、后台长任务、自动压缩和工作区文件迁移**。
 
-**当前版本：`3.1.1-fork.39` / `3000043` · 维护分支：`fork/3.1.1` · 数据库：schema 34。**
+**当前版本：`3.1.1-fork.40` / `3000044` · 维护分支：`fork/3.1.1` · 数据库：schema 34。**
 
-已跟进官方 master **`a5db9c9b`（2026-10-29）** 的全部10个后续提交；官方最新稳定版仍为3.1.1。
+已跟进官方 master **`a5db9c9b`（2026-10-29）** 的全部10个后续提交，另带官方尚未合入 master 的后台命令（预览）；官方最新稳定版仍为3.1.1。
 
 > 与官方团队没有隶属关系。本仓库记录个人修改，并在 GitHub Releases 保存已验安装包，方便重复下载；不提供官方或面向终端用户的技术支持。官方渠道下载的是官方版，不是此分支。上游版权与 AGPL-3.0 许可证保持不变。
 
-[完整功能对比](fork/FEATURES.md) · [fork.39 更新与验收](fork/RELEASE-fork39.md) · [版本历史](fork/CHANGES.md) · [构建维护](fork/README.md) · [修改声明](NOTICE.md)
+[完整功能对比](fork/FEATURES.md) · [fork.40 更新与验收](fork/RELEASE-fork40.md) · [版本历史](fork/CHANGES.md) · [构建维护](fork/README.md) · [修改声明](NOTICE.md)
 
 ## 下载与重复使用
 
-**[下载 fork.39 通用 APK（18.0 MiB）](https://github.com/682012/rikkahub/releases/download/v3.1.1-fork.39/rikkahub-3.1.1-fork.39.apk)** · [版本说明与 SHA-256](https://github.com/682012/rikkahub/releases/tag/v3.1.1-fork.39) · [最新正式版](https://github.com/682012/rikkahub/releases/latest)
+**[下载 fork.40 通用 APK（18.0 MiB）](https://github.com/682012/rikkahub/releases/download/v3.1.1-fork.40/rikkahub-3.1.1-fork.40.apk)** · [版本说明与 SHA-256](https://github.com/682012/rikkahub/releases/tag/v3.1.1-fork.40) · [最新正式版](https://github.com/682012/rikkahub/releases/latest)
 
 固定版本链接不会随 nightly 被覆盖；每个正式版本保留对应源码 tag、APK 与校验文件。直接安装不需要编译环境，也不会附带维护者的聊天、账号或服务凭据。
 
-同包名、同签名的 fork.36/37/38 可按常规覆盖升级，先备份聊天和设置；不要为升级先卸载。官方包与本分支不同，不能直接覆盖官方版。需要重新编译时见 [构建与维护](fork/README.md)，签名密钥和本机配置自行准备。
+同包名、同签名的 fork.36–39 可按常规覆盖升级，先备份聊天和设置；不要为升级先卸载。官方包与本分支不同，不能直接覆盖官方版。需要重新编译时见 [构建与维护](fork/README.md)，签名密钥和本机配置自行准备。
 
 ## 相比官方，到底增加了什么？
 
@@ -33,6 +33,12 @@
 | 增强 ② | 单会话用量面板 | 请求用量记录、全局统计 | 聊天页按会话查看输入/输出/缓存与模型明细，包含关联子代理用量 |
 
 计数说明：单会话用量面板是官方统计能力的增强；ZIP 是新增迁移流程，不代表官方没有文件导出。前两组共增加 **5 个子代理工具 + 3 个后台任务工具**，不能再把它们分别算成 8 组功能。[计数与源码依据 →](fork/FEATURES.md)
+
+## fork.40 新增：官方后台命令（预览）
+
+- 带入官方尚未合入 master 的 `feat/background-shell`：`workspace_shell` 可设 `run_in_background`，用 `workspace_shell_output` 读输出、`workspace_shell_kill` 结束，命令结束后主动通知模型。
+- 与本分支 `workspace_job_*` 并存：官方后台命令归属当前会话，只在本地 Rootfs 提供；`workspace_job` 仍是可跨会话查询的独立长任务。子代理不拿后台命令工具。
+- 预览功能以官方之后合入 master 的版本为准。[说明与验证 →](fork/RELEASE-fork40.md)
 
 ## fork.39 这次跟上了什么？
 

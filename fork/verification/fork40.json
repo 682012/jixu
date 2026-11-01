@@ -1,0 +1,74 @@
+{
+  "version": "3.1.1-fork.40",
+  "versionCode": 3000044,
+  "schema": 34,
+  "base": {
+    "release": "v3.1.1-fork.39",
+    "commit": "44fc6abbea3abea9ed6317749f156ddbe67cc7b0"
+  },
+  "upstreamMaster": "a5db9c9b770f316c76136970aa01a9d790e10e51",
+  "preview": {
+    "branch": "feat/background-shell",
+    "commits": [
+      "8a472304b3c8289bcd79ae46e24591a3756b86a5",
+      "d7627effda611a4e3256d43f12aa7367ae494f60"
+    ]
+  },
+  "buildCommit": "2b15b6ec0aa2c622f7a5cc70e5c472df62ff5426",
+  "ci": {
+    "workflow": "Fork Verify",
+    "run": 41269230304,
+    "preRun": 41268407197,
+    "release": "success",
+    "jvm": "success",
+    "instrumented": "success"
+  },
+  "jvm": {
+    "suites": 196,
+    "tests": 1336,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "skippedTests": [
+      "me.rerere.document.pdf.PdfCorpusTest.extractCorpus"
+    ]
+  },
+  "instrumented": {
+    "api": 34,
+    "abi": "x86_64",
+    "suites": 13,
+    "tests": 50,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "apk": {
+    "file": "rikkahub-3.1.1-fork.40.apk",
+    "bytes": 18925876,
+    "sha256": "58392310fcbceb70fcab06e4728ca6575ffa6746ef49da5ea98200858017d80e",
+    "certSha256": "cb897a361d49933cc7d033b7ff05b95fad6483c18bb4134b10119b0f2715bf89",
+    "abis": [
+      "arm64-v8a",
+      "x86_64"
+    ],
+    "r8": true,
+    "lintVital": true
+  },
+  "upstreamDiffReview": {
+    "hunks": 99,
+    "intentional": 83,
+    "harmless": 16,
+    "lost": 0,
+    "unclear": 0,
+    "notReviewed": []
+  },
+  "otherUpstreamBranches": {
+    "feat/remote-ssh-workspace": "已改写进 master（3.1.1 SSH 远程工作区）",
+    "feat/mediagen": "已改写进 master（媒体创作）",
+    "feat/provider-account-oauth": "已改写进 master（ChatGPTProvider / GrokProvider）",
+    "feat/context-limit": "补丁已等价进入 master",
+    "feat/media-gen": "补丁已等价进入 master",
+    "refactor/ai-stream": "2026-08 后停更的旧重构分支",
+    "refactor/chat-service": "2026-08 后停更的旧重构分支"
+  }
+}

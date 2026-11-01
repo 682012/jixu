@@ -1,6 +1,6 @@
 # 个人分支：构建与维护
 
-用户可见功能统一维护在 [仓库首页](../README.md) 与 [官方差异表](FEATURES.md)。本页记录构建、签名与回退；版本验收见 [fork.39 更新说明](RELEASE-fork39.md)。
+用户可见功能统一维护在 [仓库首页](../README.md) 与 [官方差异表](FEATURES.md)。本页记录构建、签名与回退；版本验收见 [fork.40 更新说明](RELEASE-fork40.md)。
 
 ## 当前维护对象
 
@@ -8,19 +8,19 @@
 |---|---|
 | 官方基线 | `3.1.1` / `ad2c4430` |
 | 维护分支 | `fork/3.1.1` |
-| 当前版本 | `3.1.1-fork.39` / `3000043` |
+| 当前版本 | `3.1.1-fork.40` / `3000044` |
 | 包名 | `me.rerere.rikkahub.fork` |
 | 数据库 | schema 34；与 fork.37 相同，不与官方编号混用 |
-| 已验发布构建 | R8 release，arm64-v8a + x86_64，19,214,408 字节 |
-| 构建 SHA-256 | `8499915d634a9376a834e919da43416921f71e77fb768780704d091b8024d9f3` |
+| 已验发布构建 | R8 release，arm64-v8a + x86_64 通用包，18,925,876 字节（GitHub Actions `Fork Verify`） |
+| 构建 SHA-256 | `58392310fcbceb70fcab06e4728ca6575ffa6746ef49da5ea98200858017d80e` |
 
-`master` 是上游镜像，旧 fork 分支是历史版本。已验原包保存在 [fork.38 Release](https://github.com/682012/rikkahub/releases/tag/v3.1.1-fork.38)，附 APK 与 SHA256SUMS；旧 nightly 不代表当前已验安装包。fork.39 已重新构建并实测 SSH/渲染；旧包保留，不触发旧 nightly，也不替换其资产。
+`master` 是上游镜像，旧 fork 分支是历史版本。每个正式版的已验原包保存在对应 Release（当前 [fork.40](https://github.com/682012/rikkahub/releases/tag/v3.1.1-fork.40)），附 APK 与 SHA256SUMS；旧 nightly 不代表当前已验安装包。fork.40 由 GitHub Actions `Fork Verify` 构建签名；旧包保留，不触发旧 nightly，也不替换其资产。
 
 ## 重复下载、复用与后续维护
 
 - 直接使用：下载 Release APK 即可；固定版本链接长期用于取回同一份包，[最新正式版](https://github.com/682012/rikkahub/releases/latest) 用于找后续版本。
 - 继续开发：从 Release 对应 tag 获取完整公开源码；保留上游许可证、Material 源码和测试。签名与本机配置不入库，干净克隆仍需准备下列构建环境和配置。
-- 后续发布：沿用构建和测试流程，核对版本、签名、APK SHA-256，再以独立版本 tag 归档 APK 与校验文件；不复用旧版本号、不覆盖旧资产。CI 仍只手动触发。
+- 后续发布：沿用构建和测试流程，核对版本、签名、APK SHA-256，再以独立版本 tag 归档 APK 与校验文件；不复用旧版本号、不覆盖旧资产。`Fork Verify` 只在推送 `ci/**` 分支或手动触发时运行（签名构建并核对证书、JVM 测试、API 34 模拟器测试），不自动发布 Release；旧 nightly 仍只手动触发。
 - 工作区复用：ZIP 可反复导入为独立文件区；不覆盖旧工作区，不含 Rootfs、聊天数据库或整机环境。App 数据与签名密钥分别备份。
 
 ## 构建与测试

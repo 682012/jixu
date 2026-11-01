@@ -4,6 +4,14 @@
 
 当前能力对比统一见 [FEATURES.md](FEATURES.md)：5 组新增工作流、2 项主要增强、稳定性修复与继承官方的能力分开说明。下面是按版本保留的历史记录，旧版本的行为不代表当前实现。
 
+## fork.40：带上官方后台命令预览（2026-11-01）
+
+- 在 fork.39 上带入官方未合入 master 的 `feat/background-shell`（`8a472304`、`d7627eff`）作为预览：`workspace_shell` 的 `run_in_background`、`workspace_shell_output`、`workspace_shell_kill`，命令结束后经会话收件箱主动通知模型
+- 与本分支 `workspace_job_*` 并存；后台命令只在本地 Rootfs 提供，子代理不拿后台参数和 output/kill，SSH 与 HTTP 远程执行不受影响
+- 删除误提交的 `workspace/.cxx` 构建产物与 `.orig` 残留；新增 `Fork Verify` 工作流（签名构建、JVM、API 34 模拟器）
+- GitHub Actions：JVM 1336 项 0 失败、模拟器 50 项全过、R8 + lintVital 正式构建通过；分叉相对官方 master 删改的 99 处代码逐块核对：83 处为分叉有意改造，16 处为无害差异，未发现丢失的官方功能
+- 版本 3.1.1-fork.40 / 3000044，schema 34 不变；APK 18,925,876 B，SHA256 58392310fcbceb70fcab06e4728ca6575ffa6746ef49da5ea98200858017d80e；详见 [RELEASE-fork40.md](RELEASE-fork40.md)
+
 ## fork.39：跟进官方 master 与修正更新来源（2026-11-01）
 
 - 官方最新稳定仍为3.1.1；本版合入master a5db9c9b（2026-10-29）后的完整10提交，并保留官方祖先便于后续三方合并
