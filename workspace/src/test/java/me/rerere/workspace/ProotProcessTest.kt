@@ -56,6 +56,16 @@ class ProotProcessTest {
     }
 
     @Test
+    fun `tracees are ordered parents first even when pids wrapped around`() {
+        fakeProc(200, ppid = 100, tracer = 0, env = listOf("RIKKAHUB_PROOT_RUN=run-a"))
+        fakeProc(205, ppid = 200, tracer = 200) // 初始 shell, 进程号比它派生的进程大
+        fakeProc(201, ppid = 205, tracer = 200)
+        fakeProc(203, ppid = 201, tracer = 200)
+        fakeProc(202, ppid = 1, tracer = 200) // 脱离了进程树的守护进程
+        assertEquals(listOf(202, 205, 201, 203), tree().tracees())
+    }
+
+    @Test
     fun `destroy sends SIGTERM to every tracee and nothing else`() {
         sampleTree()
         val signals = RecordingSignals()
@@ -129,7 +139,7 @@ class ProotProcessTest {
         assertEquals(0, process.destroyForciblyCalls)
     }
 
-    // 下面两项用真实 bash 验证终止脚本: 按 ProotProcess.destroy 的做法把 SIGTERM 发给 shell 和它派生的所有进程
+    // 下面两项用真实 bash 验证终止脚本: 按 ProotProcess.destroy 的顺序, 先给 shell 再给它派生的进程发 SIGTERM
 
     @Test
     fun `terminable script exits with 143 instead of running the next command`() {
@@ -139,10 +149,10 @@ class ProotProcessTest {
             val shellPid = awaitPid(File(dir, "shell.pid"))
             val pids = awaitSleeps(shellPid, sleeps = 1)
             assumeSigtermDeliverable(pids)
-            terminate(pids + shellPid)
-            assertTrue(shell.waitFor(10, TimeUnit.SECONDS))
+            terminate(listOf(shellPid) + pids)
+            assertTrue("shell still running, signalled $shellPid + $pids", shell.waitFor(10, TimeUnit.SECONDS))
             assertEquals(143, shell.exitValue())
-            assertFalse(File(dir, "after").exists())
+            assertFalse("command list continued", File(dir, "after").exists())
         } finally {
             shell.destroyForcibly()
         }
@@ -159,11 +169,12 @@ class ProotProcessTest {
             val shellPid = awaitPid(File(dir, "shell.pid"))
             val pids = awaitSleeps(shellPid, sleeps = 2)
             assumeSigtermDeliverable(pids)
-            terminate(pids + shellPid)
-            assertTrue(shell.waitFor(10, TimeUnit.SECONDS))
-            assertEquals(143, shell.exitValue())
-            assertTrue(File(dir, "cleaned").isFile)
-            assertFalse(File(dir, "after").exists())
+            terminate(listOf(shellPid) + pids)
+            val log = { "signalled $shellPid + $pids, log: ${File(dir, "out.log").readText()}" }
+            assertTrue("shell still running, ${log()}", shell.waitFor(10, TimeUnit.SECONDS))
+            assertEquals(log(), 143, shell.exitValue())
+            assertTrue("exited before background cleanup, ${log()}", File(dir, "cleaned").isFile)
+            assertFalse("command list continued, ${log()}", File(dir, "after").exists())
         } finally {
             shell.destroyForcibly()
         }

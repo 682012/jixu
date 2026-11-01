@@ -20,7 +20,8 @@ internal const val PROOT_EXEC_SCRIPT = "cd -- \"\$1\" && eval \"\$2\""
 
 /**
  * 后台命令与任务用的脚本: 收到 SIGTERM 后不再执行剩余命令, 等已派生的进程收尾后以 143 退出。
- * trap 推迟到当前前台命令结束才执行, 所以终止时 SIGTERM 要连同命令派生的进程一起发, 见 [ProotProcess.destroy]。
+ * trap 推迟到当前前台命令结束才执行, 所以终止时 SIGTERM 要连同命令派生的进程一起发, 并且先发给 shell:
+ * 前台命令先退出时 shell 可能在收到信号前就开始下一条命令, 见 [ProotProcess.destroy]。
  * 宽限期内仍未退出的进程由调用方 [ProotProcess.destroyForcibly] 结束
  */
 internal const val PROOT_TERMINABLE_SCRIPT = "trap 'trap - TERM; wait; exit 143' TERM; $PROOT_EXEC_SCRIPT"

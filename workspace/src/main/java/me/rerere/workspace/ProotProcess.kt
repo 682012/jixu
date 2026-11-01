@@ -41,7 +41,7 @@ internal class ProotProcess(
     override fun isAlive(): Boolean = delegate.isAlive
 
     /**
-     * 给所有被跟踪的进程发 SIGTERM, 不等待。
+     * 给所有被跟踪的进程发 SIGTERM, 父进程在前, 不等待。
      * 后台命令与任务的脚本收到后不再执行剩余命令, 等派生的进程收尾后退出, 见 [PROOT_TERMINABLE_SCRIPT]
      */
     override fun destroy() {
@@ -113,12 +113,26 @@ internal class ProotProcessTree(
         return pid
     }
 
-    /** PRoot 跟踪的所有进程, 包括脱离了进程树的守护进程 */
+    /**
+     * PRoot 跟踪的所有进程, 包括脱离了进程树的守护进程。
+     * 父进程排在它派生的进程前面: shell 先于前台命令收到 SIGTERM, trap 才能赶在下一条命令开始前执行
+     */
     fun tracees(): List<Int> {
         val proot = prootPid() ?: return emptyList()
-        return procDir.listFiles().orEmpty().mapNotNull { dir ->
-            dir.name.toIntOrNull()?.takeIf { statusField(it, "TracerPid") == proot }
+        val parentOf = procDir.listFiles().orEmpty().mapNotNull { dir ->
+            val pid = dir.name.toIntOrNull() ?: return@mapNotNull null
+            val status = readStatus(pid) ?: return@mapNotNull null
+            if (status.int("TracerPid") != proot) return@mapNotNull null
+            pid to status.int("PPid")
+        }.toMap()
+        val ordered = mutableListOf<Int>()
+        var level = parentOf.keys.filter { parentOf[it]?.let(parentOf::containsKey) != true }.sorted()
+        while (level.isNotEmpty()) {
+            ordered += level
+            val current = level.toSet()
+            level = parentOf.keys.filter { parentOf[it]?.let(current::contains) == true }.sorted()
         }
+        return ordered + (parentOf.keys - ordered.toSet()).sorted()
     }
 
     /** 给所有被跟踪的进程发 SIGKILL ([hard]) 或 SIGTERM */
@@ -131,16 +145,16 @@ internal class ProotProcessTree(
         prootPid()?.let(signals::kill)
     }
 
-    private fun isProot(pid: Int): Boolean =
-        statusField(pid, "PPid") == parentPid &&
-            statusField(pid, "TracerPid") == 0 &&
-            markerEntry in environ(pid)
+    private fun isProot(pid: Int): Boolean {
+        val status = readStatus(pid) ?: return false
+        return status.int("PPid") == parentPid && status.int("TracerPid") == 0 && markerEntry in environ(pid)
+    }
 
-    private fun statusField(pid: Int, name: String): Int? = runCatching {
-        File(procDir, "$pid/status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("$name:") }?.substringAfter(':')?.trim()?.toIntOrNull()
-        }
+    private fun readStatus(pid: Int): Map<String, String>? = runCatching {
+        File(procDir, "$pid/status").readLines().associate { it.substringBefore(':') to it.substringAfter(':').trim() }
     }.getOrNull()
+
+    private fun Map<String, String>.int(name: String): Int? = this[name]?.toIntOrNull()
 
     private fun environ(pid: Int): List<String> = runCatching {
         File(procDir, "$pid/environ").readBytes().toString(Charsets.UTF_8).split('\u0000')
